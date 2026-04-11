@@ -230,14 +230,7 @@ class FileScanner: ObservableObject {
                         self.totalRecovered += Int64(group.sizeBytes)
                     }
                     
-                    // Filter out groups that no longer have at least 2 remaining files
-                    self.duplicateGroups = self.duplicateGroups.filter { group in
-                        let remaining = group.files.filter { !self.deletedPaths.contains($0.fullPath) }.count
-                        return remaining > 1
-                    }
-                    
                     self.status = "Moved to Trash."
-                    self.applySort() 
                 }
             }
         }
