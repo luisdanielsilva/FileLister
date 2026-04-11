@@ -138,27 +138,6 @@ struct ContentView: View {
             }
             .padding(.bottom, 10).padding(.horizontal).frame(maxWidth: .infinity, alignment: .leading)
 
-            // Statistics Bar
-            if scanner.totalPotentialSavings > 0 || scanner.totalRecovered > 0 {
-                HStack(spacing: 15) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "externaldrive.fill").font(.system(size: 10))
-                        Text("Potential Savings:").fontWeight(.bold)
-                        Text(scanner.formatBytes(scanner.totalPotentialSavings))
-                    }
-                    Rectangle().fill(Color.gray.opacity(0.3)).frame(width: 1, height: 10)
-                    HStack(spacing: 4) {
-                        Image(systemName: "sparkles").font(.system(size: 10))
-                        Text("Recovered:").fontWeight(.bold)
-                        Text(scanner.formatBytes(scanner.totalRecovered))
-                            .foregroundColor(.green)
-                    }
-                }
-                .font(.system(size: 10))
-                .padding(.horizontal)
-                .padding(.bottom, 12)
-                .foregroundColor(.secondary)
-            }
 
             if scanner.isScanning {
                 ProgressView(value: scanner.progress, total: 1.0)
@@ -259,6 +238,29 @@ struct ContentView: View {
                     .frame(width: 7, height: 7)
                 Text(scanner.status).font(.system(size: 10)).foregroundColor(.secondary)
                 Spacer()
+                
+                if scanner.totalPotentialSavings > 0 || scanner.totalRecovered > 0 {
+                    HStack(spacing: 12) {
+                        HStack(spacing: 3) {
+                            Image(systemName: "externaldrive.fill").font(.system(size: 8))
+                            Text("Potential Savings:").fontWeight(.bold)
+                            Text(scanner.formatBytes(scanner.totalPotentialSavings))
+                        }
+                        
+                        Divider().frame(height: 10).padding(.horizontal, 4)
+                        
+                        HStack(spacing: 3) {
+                            Image(systemName: "sparkles").font(.system(size: 8))
+                            Text("Recoveries:").fontWeight(.bold)
+                            Text(scanner.formatBytes(scanner.totalRecovered))
+                                .foregroundColor(.green)
+                        }
+                    }
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                    .padding(.trailing, 10)
+                }
+
                 if scanner.progress > 0 && scanner.progress < 1 {
                     Text("\(Int(scanner.progress * 100))%").font(.system(size: 9, weight: .bold)).foregroundColor(.green)
                 }
