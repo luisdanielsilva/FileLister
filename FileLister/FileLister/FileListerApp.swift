@@ -10,8 +10,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 while mainMenu.numberOfItems > 1 {
                     mainMenu.removeItem(at: 1)
                 }
+                
+                // Now we add our custom "License Key..." menu item to the Application menu
+                if let appMenu = mainMenu.item(at: 0)?.submenu {
+                    // Check if it's already there to avoid duplicates
+                    if !appMenu.items.contains(where: { $0.title == "License Key..." }) {
+                        let licenseItem = NSMenuItem(title: "License Key...", action: #selector(self.openLicenseSheet), keyEquivalent: "l")
+                        licenseItem.target = self
+                        // Insert After "About FileLister" (which is usually index 0)
+                        appMenu.insertItem(licenseItem, at: 1)
+                    }
+                }
             }
         }
+    }
+    
+    @objc func openLicenseSheet() {
+        NotificationCenter.default.post(name: NSNotification.Name("toggleLicenseSheet"), object: nil)
     }
 }
 
@@ -29,13 +44,12 @@ struct FileListerApp: App {
                     LicenseView(isPresented: $showingLicenseSheet)
                         .environmentObject(licenseManager)
                 }
-        }
-        .commands {
-            CommandGroup(after: .appInfo) {
-                Button("License Key...") {
+                .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("toggleLicenseSheet"))) { _ in
                     showingLicenseSheet = true
                 }
-            }
+        }
+        .commands {
+            // We empty the commands or leave only essential ones since we manage the App menu in AppDelegate
             CommandGroup(replacing: .appInfo) {
                 Button("About FileLister") {
                     let credits = NSAttributedString(
