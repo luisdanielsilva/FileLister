@@ -222,8 +222,7 @@ class FileScanner: ObservableObject {
             DispatchQueue.main.async { self.fileProgress = 0 }
             return hasher.finalize().map { String(format: "%02hhx", $0) }.joined()
         } catch {
-            print("Warning: Could not hash cloud/locked file at \(path): \(error)")
-            return nil // Gracefully skip instead of crashing
+            return nil
         }
     }
     
@@ -240,7 +239,6 @@ class FileScanner: ObservableObject {
             let s2 = attr2[.size] as? Int
             
             guard let size1 = s1, let size2 = s2, size1 == size2 else { 
-                print("Size mismatch or invalid attributes: \(s1 ?? -1) vs \(s2 ?? -1)")
                 return false 
             }
             
@@ -267,7 +265,6 @@ class FileScanner: ObservableObject {
             DispatchQueue.main.async { self.fileProgress = 0 }
             return true
         } catch {
-            print("Comparison error: \(error.localizedDescription)")
             return false
         }
     }
