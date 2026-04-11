@@ -217,20 +217,123 @@ class FileScanner: ObservableObject {
         }
     }
     
+    private func isContentIdentical(url1: URL, url2: URL) -> Bool {
+        do {
+            let handle1 = try FileHandle(forReadingFrom: url1)
+            let handle2 = try FileHandle(forReadingFrom: url2)
+            defer { try? handle1.close(); try? handle2.close() }
+            
+            // Final size sanity check
+            let attr1 = try FileManager.default.attributesOfItem(atPath: url1.path)
+            let attr2 = try FileManager.default.attributesOfItem(atPath: url2.path)
+            guard let size1 = attr1[.size] as? Int, let size2 = attr2[.size] as? Int, size1 == size2 else { 
+                print("Size mismatch: \(size1) vs \(size2)")
+                return false 
+            }
+            
+            while true {
+                let data1 = try handle1.read(upToCount: 64 * 1024)
+                let data2 = try handle2.read(upToCount: 64 * 1024)
+                
+                if data1 != data2 { return false }
+                if data1 == nil || data1!.isEmpty { break }
+            }
+            return true
+        } catch {
+            print("Comparison error: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     func recycleFile(atPath fullPath: String) {
         let fileURL = URL(fileURLWithPath: fullPath)
-        NSWorkspace.shared.recycle([fileURL]) { (newURLs, error) in
+        
+        // SECURITY: Identify the original/reference file
+        guard let group = self.duplicateGroups.first(where: { g in g.files.contains(where: { $0.fullPath == fullPath }) }) else { return }
+        
+        // Find the first active file that is NOT the one being deleted
+        guard let referenceFile = group.files.first(where: { $0.fullPath != fullPath && !deletedPaths.contains($0.fullPath) }) else {
+            self.status = "Security Error: No active original file found!"
+            return
+        }
+        
+        let referenceURL = URL(fileURLWithPath: referenceFile.fullPath)
+        self.status = "Verifying binary identity..."
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            let identical = self.isContentIdentical(url1: fileURL, url2: referenceURL)
+            
             DispatchQueue.main.async {
-                if let error = error { self.status = "Error: \(error.localizedDescription)" }
-                else { 
-                    self.deletedPaths.insert(fullPath)
-                    
-                    // Add to recovered space
-                    if let group = self.duplicateGroups.first(where: { g in g.files.contains(where: { $0.fullPath == fullPath }) }) {
-                        self.totalRecovered += Int64(group.sizeBytes)
+                if !identical {
+                    self.status = "Security Alert: Files differ! Deletion aborted."
+                    return
+                }
+                
+                NSWorkspace.shared.recycle([fileURL]) { (newURLs, error) in
+                    DispatchQueue.main.async {
+                        if let error = error { self.status = "Error: \(error.localizedDescription)" }
+                        else { 
+                            self.deletedPaths.insert(fullPath)
+                            self.totalRecovered += Int64(group.sizeBytes)
+                            self.status = "Security Verified! Moved to Trash."
+                        }
                     }
+                }
+            }
+        }
+    }
+
+    func recycleAllDuplicates() {
+        self.status = "Verifying batch integrity..."
+        self.isScanning = true // Use scan state to block UI during heavy comparison
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            var toRecycle: [URL] = []
+            var totalSavingsInSession: Int64 = 0
+            var skippedCount = 0
+            
+            for group in self.duplicateGroups {
+                let activeFiles = group.files.filter { !self.deletedPaths.contains($0.fullPath) }
+                
+                if activeFiles.count > 1 {
+                    let referenceFile = activeFiles[0] // First file is the Original
+                    let referenceURL = URL(fileURLWithPath: referenceFile.fullPath)
                     
-                    self.status = "Moved to Trash."
+                    for i in 1..<activeFiles.count {
+                        let file = activeFiles[i]
+                        let fileURL = URL(fileURLWithPath: file.fullPath)
+                        
+                        if self.isContentIdentical(url1: fileURL, url2: referenceURL) {
+                            toRecycle.append(fileURL)
+                            totalSavingsInSession += Int64(group.sizeBytes)
+                        } else {
+                            skippedCount += 1
+                        }
+                    }
+                }
+            }
+            
+            if toRecycle.isEmpty {
+                DispatchQueue.main.async {
+                    self.status = skippedCount > 0 ? "Alert: \(skippedCount) files differ and were skipped." : "No duplicates to clean."
+                    self.isScanning = false
+                }
+                return
+            }
+            
+            let count = toRecycle.count
+            NSWorkspace.shared.recycle(toRecycle) { (newURLs, error) in
+                DispatchQueue.main.async {
+                    self.isScanning = false
+                    if let error = error {
+                        self.status = "Batch Error: \(error.localizedDescription)"
+                    } else {
+                        // Batch update UI
+                        for url in toRecycle { self.deletedPaths.insert(url.path) }
+                        self.totalRecovered += totalSavingsInSession
+                        let skipMsg = skippedCount > 0 ? " (\(skippedCount) files skipped for safety)" : ""
+                        self.status = "Security Verified! \(count) files moved to Trash\(skipMsg)."
+                    }
                 }
             }
         }

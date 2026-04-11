@@ -79,6 +79,15 @@ struct ContentView: View {
     
     // Selection state for Quick Look
     @State private var selectedFile: DuplicateFileInfo? = nil
+    @State private var showingBatchDeleteConfirm = false
+    
+    var hasRemovableDuplicates: Bool {
+        for group in scanner.duplicateGroups {
+            let activeCount = group.files.filter { !scanner.deletedPaths.contains($0.fullPath) }.count
+            if activeCount > 1 { return true }
+        }
+        return false
+    }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -134,6 +143,23 @@ struct ContentView: View {
                 HStack(spacing: 8) {
                     sortButton(label: "Copies", criteria: .count)
                     sortButton(label: "Size", criteria: .size)
+                }
+                
+                Spacer()
+                
+                if hasRemovableDuplicates && !scanner.isScanning {
+                    Button(action: { showingBatchDeleteConfirm = true }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "trash.fill")
+                            Text("Clean All Duplicates")
+                        }
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.red)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Color.red.opacity(0.1)).cornerRadius(5)
+                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.red.opacity(0.3), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.bottom, 10).padding(.horizontal).frame(maxWidth: .infinity, alignment: .leading)
@@ -268,6 +294,14 @@ struct ContentView: View {
             .padding(.horizontal, 10).frame(height: 24).background(Color.gray.opacity(0.05)).overlay(Divider(), alignment: .top)
         }
         .frame(minWidth: 700, minHeight: 520)
+        .alert("Confirm Batch Deletion?", isPresented: $showingBatchDeleteConfirm) {
+            Button("Clean All", role: .destructive) {
+                scanner.recycleAllDuplicates()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("⚠️ This action moves ALL detected duplicates to the Trash. This change is irreversible.\n\nNote: Original files (one per group) will be kept safe.")
+        }
     }
     
     private func sortButton(label: String, criteria: SortCriteria) -> some View {
