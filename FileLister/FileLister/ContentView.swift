@@ -227,12 +227,15 @@ struct ContentView: View {
             } else {
                 Spacer()
                 if !scanner.isScanning && (scanner.status == "Ready to start" || scanner.duplicateGroups.isEmpty) {
-                    VStack {
-                        Image(systemName: scanner.duplicateGroups.isEmpty && !scanner.status.contains("Ready") ? "checkmark.circle" : "folder.badge.plus")
-                            .font(.system(size: 40)).foregroundColor(.gray.opacity(0.2))
-                        Text(scanner.duplicateGroups.isEmpty && !scanner.status.contains("Ready") ? "No duplicates found" : "Select a folder to begin")
-                            .font(.caption2).foregroundColor(.secondary)
+                    Button(action: { selectSource() }) {
+                        VStack {
+                            Image(systemName: scanner.duplicateGroups.isEmpty && !scanner.status.contains("Ready") ? "checkmark.circle" : "folder.badge.plus")
+                                .font(.system(size: 40)).foregroundColor(.gray.opacity(0.2))
+                            Text(scanner.duplicateGroups.isEmpty && !scanner.status.contains("Ready") ? "No duplicates found" : "Select a folder to begin")
+                                .font(.caption2).foregroundColor(.secondary)
+                        }
                     }
+                    .buttonStyle(.plain)
                 }
                 Spacer()
             }
