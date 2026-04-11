@@ -236,8 +236,11 @@ class FileScanner: ObservableObject {
             // Final size sanity check
             let attr1 = try FileManager.default.attributesOfItem(atPath: url1.path)
             let attr2 = try FileManager.default.attributesOfItem(atPath: url2.path)
-            guard let size1 = attr1[.size] as? Int, let size2 = attr2[.size] as? Int, size1 == size2 else { 
-                print("Size mismatch: \(size1) vs \(size2)")
+            let s1 = attr1[.size] as? Int
+            let s2 = attr2[.size] as? Int
+            
+            guard let size1 = s1, let size2 = s2, size1 == size2 else { 
+                print("Size mismatch or invalid attributes: \(s1 ?? -1) vs \(s2 ?? -1)")
                 return false 
             }
             
