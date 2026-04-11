@@ -55,13 +55,13 @@
 
 ---
 
-## 🗺️ Roadmap (Próximas Melhorias)
+## 🗺️ Roadmap (Future Improvements)
 
-Estamos constantemente a planear novas funcionalidades. Aqui estão os próximos passos:
+We are constantly planning new features. Here are the next steps:
 
-*   [ ] **Limpeza em Lote**: Adicionar um botão "Limpar Tudo" para apagar todos os duplicados de um grupo de uma só vez, mantendo apenas o exemplar original.
-*   [ ] **Funcionalidades Premium**: Implementar um sistema de ativação por chave para disponibilizar recursos extras na aplicação.
-*   [ ] **Downloads Diretos**: Disponibilizar executáveis pré-compilados na secção de [Releases](https://github.com/luisdanielsilva/FileLister/releases) do GitHub para que não seja necessário compilar o código para usar a app.
+*   [ ] **Batch Cleanup**: Add a "Clear All" button to delete all duplicates in a group at once, keeping only the original copy.
+*   [ ] **Premium Features**: Implement a license key system to unlock extra features within the application.
+*   [ ] **Direct Downloads**: Provide pre-compiled executables in the [Releases](https://github.com/luisdanielsilva/FileLister/releases) section of GitHub so that users don't need to compile the code to use the app.
 
 ---
 
