@@ -55,4 +55,14 @@
 
 ---
 
-*Built with ❤️ for macOS users.*
+## 🗺️ Roadmap (Próximas Melhorias)
+
+Estamos constantemente a planear novas funcionalidades. Aqui estão os próximos passos:
+
+*   [ ] **Limpeza em Lote**: Adicionar um botão "Limpar Tudo" para apagar todos os duplicados de um grupo de uma só vez, mantendo apenas o exemplar original.
+*   [ ] **Funcionalidades Premium**: Implementar um sistema de ativação por chave para disponibilizar recursos extras na aplicação.
+*   [ ] **Downloads Diretos**: Disponibilizar executáveis pré-compilados na secção de [Releases](https://github.com/luisdanielsilva/FileLister/releases) do GitHub para que não seja necessário compilar o código para usar a app.
+
+---
+
+*Built with ❤️ for macOS users by Luís Silva.*
