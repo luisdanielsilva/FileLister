@@ -18,12 +18,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct FileListerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @StateObject private var licenseManager = LicenseManager.shared
+    @State private var showingLicenseSheet = false
     
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(licenseManager)
+                .sheet(isPresented: $showingLicenseSheet) {
+                    LicenseView(isPresented: $showingLicenseSheet)
+                        .environmentObject(licenseManager)
+                }
         }
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("License Key...") {
+                    showingLicenseSheet = true
+                }
+            }
             CommandGroup(replacing: .appInfo) {
                 Button("About FileLister") {
                     let credits = NSAttributedString(

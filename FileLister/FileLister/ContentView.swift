@@ -75,11 +75,13 @@ struct SelectionButton: View {
 
 struct ContentView: View {
     @StateObject private var scanner = FileScanner()
+    @EnvironmentObject var licenseManager: LicenseManager
     @State private var sourceURL: URL?
     
     // Selection state for Quick Look
     @State private var selectedFile: DuplicateFileInfo? = nil
     @State private var showingBatchDeleteConfirm = false
+    @State private var showingRegisterAlert = false
     
     var hasRemovableDuplicates: Bool {
         for group in scanner.duplicateGroups {
@@ -148,7 +150,13 @@ struct ContentView: View {
                 Spacer()
                 
                 if hasRemovableDuplicates && !scanner.isScanning {
-                    Button(action: { showingBatchDeleteConfirm = true }) {
+                    Button(action: { 
+                        if licenseManager.isRegistered {
+                            showingBatchDeleteConfirm = true 
+                        } else {
+                            showingRegisterAlert = true
+                        }
+                    }) {
                         HStack(spacing: 4) {
                             Image(systemName: "trash.fill")
                             Text("Clean All Duplicates")
@@ -221,7 +229,18 @@ struct ContentView: View {
                                                 }
                                                 .buttonStyle(.plain).help("Open folder in Finder")
 
-                                                Button(action: { if remainingCount > 1 { scanner.recycleFile(atPath: fullPath) } }) {
+                                                Button(action: { 
+                                                    if remainingCount > 1 { 
+                                                        if licenseManager.canPerformFreeDeletion() {
+                                                            scanner.recycleFile(atPath: fullPath)
+                                                            // Note: In a real app, we'd only count successful deletions. 
+                                                            // For simplicity here, we record the attempt.
+                                                            licenseManager.recordDeletion()
+                                                        } else {
+                                                            showingRegisterAlert = true
+                                                        }
+                                                    } 
+                                                }) {
                                                     Image(systemName: remainingCount > 1 ? "trash" : "lock.fill")
                                                         .font(.system(size: 9)).foregroundColor(remainingCount > 1 ? .gray : .green.opacity(0.5))
                                                 }
@@ -301,6 +320,18 @@ struct ContentView: View {
                 if scanner.progress > 0 && scanner.progress < 1 {
                     Text("\(Int(scanner.progress * 100))%").font(.system(size: 9, weight: .bold)).foregroundColor(.green)
                 }
+
+                if !licenseManager.isRegistered {
+                    Divider().frame(height: 10).padding(.horizontal, 4)
+                    HStack(spacing: 3) {
+                        Image(systemName: "timer").font(.system(size: 8))
+                        Text("Trial Mode:").fontWeight(.bold)
+                        Text("\(licenseManager.trialDeletions)/15 files used")
+                    }
+                    .font(.system(size: 9))
+                    .foregroundColor(.orange)
+                    .padding(.trailing, 5)
+                }
             }
             .padding(.horizontal, 10).frame(height: 24).background(Color.gray.opacity(0.05)).overlay(Divider(), alignment: .top)
         }
@@ -312,6 +343,16 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("⚠️ This action moves ALL detected duplicates to the Trash. This change is irreversible.\n\nNote: Original files (one per group) will be kept safe.")
+        }
+        .alert("Register the application to use this feature", isPresented: $showingRegisterAlert) {
+            Button("Register here") {
+                if let url = URL(string: "https://www.google.com") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("You have reached the trial limit or are attempting a premium action. Please register to unlock unlimited access.")
         }
     }
     
