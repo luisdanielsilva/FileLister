@@ -63,6 +63,7 @@ We are constantly planning new features. Here are the next steps:
 *   [ ] **Premium Features**: Implement a license key system to unlock extra features within the application.
 *   [ ] **Direct Downloads**: Provide pre-compiled executables in the [Releases](https://github.com/luisdanielsilva/FileLister/releases) section of GitHub so that users don't need to compile the code to use the app.
 *   [ ] **Detailed Progress Monitoring**: Display granular file reading progress, especially useful for monitoring performance on slow network or cloud drives (e.g., OneDrive).
+*   [ ] **Final Binary Verification**: Implement a mandatory binary or hash comparison check immediately before deleting any file to guarantee 100% identity, providing an extra layer of safety even during "Quick Scans".
 
 ---
 
