@@ -326,7 +326,14 @@ struct ContentView: View {
                     HStack(spacing: 3) {
                         Image(systemName: "timer").font(.system(size: 8))
                         Text("Trial Mode:").fontWeight(.bold)
-                        Text("\(licenseManager.trialDeletions)/15 files used")
+                        Text("\(licenseManager.trialDeletions)/15 used")
+                        
+                        Button("(Register App)") {
+                            NotificationCenter.default.post(name: NSNotification.Name("toggleLicenseSheet"), object: nil)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.blue)
+                        .padding(.leading, 5)
                     }
                     .font(.system(size: 9))
                     .foregroundColor(.orange)

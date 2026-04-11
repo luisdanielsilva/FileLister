@@ -2,25 +2,29 @@ import SwiftUI
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // We use a small delay to ensure SwiftUI has finished its default menu setup
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            if let mainMenu = NSApplication.shared.mainMenu {
-                // Index 0 is the Application menu (FileLister)
-                // We remove everything from index 1 onwards (File, Edit, Format, View, Window, Help)
-                while mainMenu.numberOfItems > 1 {
-                    mainMenu.removeItem(at: 1)
-                }
-                
-                // Now we add our custom "License Key..." menu item to the Application menu
-                if let appMenu = mainMenu.item(at: 0)?.submenu {
-                    // Check if it's already there to avoid duplicates
-                    if !appMenu.items.contains(where: { $0.title == "License Key..." }) {
-                        let licenseItem = NSMenuItem(title: "License Key...", action: #selector(self.openLicenseSheet), keyEquivalent: "l")
-                        licenseItem.target = self
-                        // Insert After "About FileLister" (which is usually index 0)
-                        appMenu.insertItem(licenseItem, at: 1)
-                    }
-                }
+        // We try several times to ensure the menu is inserted after system initialization
+        for delay in [0.2, 0.5, 1.0, 2.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                self.setupCustomMenu()
+            }
+        }
+    }
+    
+    private func setupCustomMenu() {
+        guard let mainMenu = NSApplication.shared.mainMenu else { return }
+        
+        // Ensure index 0 (App Menu) exists
+        if mainMenu.numberOfItems > 0, let appMenu = mainMenu.item(at: 0)?.submenu {
+            // Prune other menus if they reappeared
+            while mainMenu.numberOfItems > 1 {
+                mainMenu.removeItem(at: 1)
+            }
+            
+            // Insert "License Key..." if missing
+            if !appMenu.items.contains(where: { $0.title == "License Key..." }) {
+                let licenseItem = NSMenuItem(title: "License Key...", action: #selector(self.openLicenseSheet), keyEquivalent: "l")
+                licenseItem.target = self
+                appMenu.insertItem(licenseItem, at: 1)
             }
         }
     }
