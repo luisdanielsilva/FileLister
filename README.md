@@ -62,7 +62,7 @@ We are constantly planning new features. Here are the next steps:
 *   [x] **Batch Cleanup**: Added a "Clean All Duplicates" button with a safety confirmation dialog.
 *   [ ] **Premium Features**: Implement a license key system to unlock extra features within the application.
 *   [ ] **Public Release**: Provide pre-compiled and notarized binaries in the [Releases](https://github.com/luisdanielsilva/FileLister/releases) section so any user can download and run FileLister instantly without needing Xcode or technical knowledge.
-*   [ ] **Detailed Progress Monitoring**: Display granular file reading progress, especially useful for monitoring performance on slow network or cloud drives (e.g., OneDrive).
+*   [x] **Detailed Progress Monitoring**: Display granular file reading progress during hashing and verification.
 *   [x] **Final Binary Verification**: Added a mandatory byte-by-byte content comparison before any deletion to guarantee 100% identity.
 
 ---

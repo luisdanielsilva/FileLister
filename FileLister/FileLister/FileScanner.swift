@@ -41,6 +41,7 @@ class FileScanner: ObservableObject {
     
     @Published var totalPotentialSavings: Int64 = 0
     @Published var totalRecovered: Int64 = 0
+    @Published var fileProgress: Double = 0.0
     
     @Published var useDeepAnalysis: Bool = false
     @Published var filterMediaOnly: Bool = false
@@ -204,12 +205,21 @@ class FileScanner: ObservableObject {
             let handle = try FileHandle(forReadingFrom: fileURL)
             defer { try? handle.close() }
             
+            let totalSize = Int64((try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+            var bytesRead: Int64 = 0
+            
             var hasher = SHA256()
             // USE MODERN Swift API (throws proper errors instead of NSException crash)
             while let data = try handle.read(upToCount: 64 * 1024), !data.isEmpty {
                 hasher.update(data: data)
+                bytesRead += Int64(data.count)
+                if totalSize > 0 {
+                    let p = Double(bytesRead) / Double(totalSize)
+                    DispatchQueue.main.async { self.fileProgress = p }
+                }
             }
             
+            DispatchQueue.main.async { self.fileProgress = 0 }
             return hasher.finalize().map { String(format: "%02hhx", $0) }.joined()
         } catch {
             print("Warning: Could not hash cloud/locked file at \(path): \(error)")
@@ -231,13 +241,27 @@ class FileScanner: ObservableObject {
                 return false 
             }
             
+            var bytesRead: Int64 = 0
+            let totalSize = Int64(size1)
+            
             while true {
                 let data1 = try handle1.read(upToCount: 64 * 1024)
                 let data2 = try handle2.read(upToCount: 64 * 1024)
                 
-                if data1 != data2 { return false }
+                if data1 != data2 { 
+                    DispatchQueue.main.async { self.fileProgress = 0 }
+                    return false 
+                }
+                
                 if data1 == nil || data1!.isEmpty { break }
+                
+                bytesRead += Int64(data1!.count)
+                if totalSize > 0 {
+                    let p = Double(bytesRead) / Double(totalSize)
+                    DispatchQueue.main.async { self.fileProgress = p }
+                }
             }
+            DispatchQueue.main.async { self.fileProgress = 0 }
             return true
         } catch {
             print("Comparison error: \(error.localizedDescription)")

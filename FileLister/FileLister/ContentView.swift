@@ -166,8 +166,18 @@ struct ContentView: View {
 
 
             if scanner.isScanning {
-                ProgressView(value: scanner.progress, total: 1.0)
-                    .accentColor(.green).progressViewStyle(.linear).padding(.horizontal).padding(.bottom, 10)
+                VStack(spacing: 4) {
+                    ProgressView(value: scanner.progress, total: 1.0)
+                        .accentColor(.green).progressViewStyle(.linear).padding(.horizontal)
+                    
+                    if scanner.fileProgress > 0 && scanner.fileProgress < 1 {
+                        ProgressView(value: scanner.fileProgress, total: 1.0)
+                            .accentColor(.blue).progressViewStyle(.linear).padding(.horizontal)
+                            .scaleEffect(x: 1, y: 0.5, anchor: .center)
+                            .transition(.opacity)
+                    }
+                }
+                .padding(.bottom, 10)
             }
 
             // Duplicates List
@@ -262,7 +272,8 @@ struct ContentView: View {
                     (scanner.isScanning ? Color.green : (scanner.status.contains("Completed") || scanner.status.contains("Trash") ? Color.blue : Color.gray))
                 )
                     .frame(width: 7, height: 7)
-                Text(scanner.status).font(.system(size: 10)).foregroundColor(.secondary)
+                Text(scanner.status + (scanner.fileProgress > 0 && scanner.fileProgress < 1 ? " (\(Int(scanner.fileProgress * 100))%)" : ""))
+                    .font(.system(size: 10)).foregroundColor(.secondary)
                 Spacer()
                 
                 if scanner.totalPotentialSavings > 0 || scanner.totalRecovered > 0 {
