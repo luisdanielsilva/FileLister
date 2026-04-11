@@ -39,6 +39,9 @@ class FileScanner: ObservableObject {
     @Published var duplicateGroups: [DuplicateGroup] = []
     @Published var deletedPaths: Set<String> = []
     
+    @Published var totalPotentialSavings: Int64 = 0
+    @Published var totalRecovered: Int64 = 0
+    
     @Published var useDeepAnalysis: Bool = false
     @Published var filterMediaOnly: Bool = false
     @Published var skipHiddenFiles: Bool = false
@@ -55,13 +58,15 @@ class FileScanner: ObservableObject {
         "mp4", "mov", "avi", "mkv", "wmv", "flv", "webm"
     ]
 
-    func startScan(sourceURL: URL, destinationURL: URL) {
+    func startScan(sourceURL: URL) {
         shouldStop = false
         isScanning = true
         progress = 0
         status = "Counting files..."
         duplicateGroups = []
         deletedPaths = []
+        totalPotentialSavings = 0
+        totalRecovered = 0
         
         DispatchQueue.global(qos: .userInitiated).async {
             self.totalItems = self.countItems(at: sourceURL)
@@ -69,7 +74,7 @@ class FileScanner: ObservableObject {
                 DispatchQueue.main.async { self.status = "No files found."; self.isScanning = false }
                 return
             }
-            self.performScan(sourceURL: sourceURL, destinationURL: destinationURL)
+            self.performScan(sourceURL: sourceURL)
         }
     }
     
@@ -84,7 +89,7 @@ class FileScanner: ObservableObject {
         return count
     }
     
-    private func performScan(sourceURL: URL, destinationURL: URL) {
+    private func performScan(sourceURL: URL) {
         let fileManager = FileManager.default
         let keys: [URLResourceKey] = [.fileSizeKey, .typeIdentifierKey, .isDirectoryKey]
         
@@ -93,11 +98,8 @@ class FileScanner: ObservableObject {
             return
         }
         
-        var buffer = ""
         self.processedItems = 0
         var tracker: [String: [DuplicateFileInfo]] = [:]
-        
-        try? buffer.write(to: destinationURL, atomically: true, encoding: .utf8)
         
         while let fileURL = enumerator.nextObject() as? URL {
             if shouldStop { break }
@@ -112,7 +114,6 @@ class FileScanner: ObservableObject {
                 let path = fileURL.deletingLastPathComponent().path
                 let sizeInBytes = resourceValues.fileSize ?? 0
                 let sizeStr = formatSize(sizeInBytes)
-                buffer += "\(path);\(name);\(sizeStr);\(ext)\n"
                 
                 if !isDir {
                     let key = "\(name)_\(sizeInBytes)"
@@ -123,7 +124,6 @@ class FileScanner: ObservableObject {
                 processedItems += 1
                 let currentProgress = Double(processedItems) / Double(max(1, totalItems))
                 DispatchQueue.main.async { self.progress = currentProgress; self.status = "Scanning: \(name)" }
-                if processedItems % 100 == 0 { try appendToFile(url: destinationURL, content: buffer); buffer = "" }
             } catch { continue }
         }
         
@@ -137,9 +137,9 @@ class FileScanner: ObservableObject {
         }
         
         if !shouldStop {
-            try? appendToFile(url: destinationURL, content: buffer)
             DispatchQueue.main.async {
                 self.duplicateGroups = groups
+                self.totalPotentialSavings = groups.reduce(0) { $0 + Int64($1.sizeBytes) * Int64($1.files.count - 1) }
                 self.applySort()
                 self.status = "Completed! \(groups.count) groups found."
                 self.isScanning = false
@@ -160,7 +160,10 @@ class FileScanner: ObservableObject {
             switch sortCriteria {
             case .name: result = a.name < b.name
             case .size: result = a.sizeBytes < b.sizeBytes
-            case .count: result = a.files.count < b.files.count
+            case .count:
+                let countA = a.files.filter { !deletedPaths.contains($0.fullPath) }.count
+                let countB = b.files.filter { !deletedPaths.contains($0.fullPath) }.count
+                result = countA < countB
             }
             return (sortOrder == .ascending) ? result : !result
         }
@@ -219,19 +222,39 @@ class FileScanner: ObservableObject {
         NSWorkspace.shared.recycle([fileURL]) { (newURLs, error) in
             DispatchQueue.main.async {
                 if let error = error { self.status = "Error: \(error.localizedDescription)" }
-                else { self.deletedPaths.insert(fullPath); self.status = "Moved to Trash."; self.applySort() }
+                else { 
+                    self.deletedPaths.insert(fullPath)
+                    
+                    // Add to recovered space
+                    if let group = self.duplicateGroups.first(where: { g in g.files.contains(where: { $0.fullPath == fullPath }) }) {
+                        self.totalRecovered += Int64(group.sizeBytes)
+                    }
+                    
+                    // Filter out groups that no longer have at least 2 remaining files
+                    self.duplicateGroups = self.duplicateGroups.filter { group in
+                        let remaining = group.files.filter { !self.deletedPaths.contains($0.fullPath) }.count
+                        return remaining > 1
+                    }
+                    
+                    self.status = "Moved to Trash."
+                    self.applySort() 
+                }
             }
         }
     }
     
-    private func appendToFile(url: URL, content: String) throws {
-        guard let data = content.data(using: .utf8), !content.isEmpty else { return }
-        if let fileHandle = try? FileHandle(forWritingTo: url) {
-            defer { try? fileHandle.close() }
-            try fileHandle.seekToEnd(); try fileHandle.write(contentsOf: data)
-        }
+    func formatBytes(_ bytes: Int64) -> String {
+        let kb = Double(bytes) / 1024.0
+        let mb = kb / 1024.0
+        let gb = mb / 1024.0
+        let tb = gb / 1024.0
+        
+        if tb >= 1 { return String(format: "%.2f TB", tb) }
+        if gb >= 1 { return String(format: "%.2f GB", gb) }
+        if mb >= 1 { return String(format: "%.2f MB", mb) }
+        return String(format: "%.2f KB", kb)
     }
-    
+
     private func formatSize(_ bytes: Int) -> String {
         let kb = Double(bytes) / 1024.0
         return kb < 1024 ? String(format: "%.2f KB", kb) : String(format: "%.2f MB", kb / 1024.0)

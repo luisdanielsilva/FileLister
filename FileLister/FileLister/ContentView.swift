@@ -31,15 +31,31 @@ class QuickLookManager: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelega
     }
 }
 
+struct FileIconView: View {
+    let path: String
+    let size: CGFloat
+    
+    var body: some View {
+        // NSWorkspace icon(forFile:) is very efficient as it uses internal caching
+        let nsImage = NSWorkspace.shared.icon(forFile: path)
+        Image(nsImage: nsImage)
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fit)
+            .frame(width: size, height: size)
+    }
+}
+
+
 struct SelectionButton: View {
     let file: DuplicateFileInfo
     @Binding var selectedFile: DuplicateFileInfo?
     let isDeleted: Bool
     
     var body: some View {
-        HStack {
+        HStack(spacing: 6) {
             Text(file.path)
-                .font(.system(size: 8, design: .monospaced))
+                .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(isDeleted ? .red : (selectedFile?.id == file.id ? .white : .secondary))
                 .strikethrough(isDeleted)
             Spacer()
@@ -60,7 +76,6 @@ struct SelectionButton: View {
 struct ContentView: View {
     @StateObject private var scanner = FileScanner()
     @State private var sourceURL: URL?
-    @State private var destinationURL: URL?
     
     // Selection state for Quick Look
     @State private var selectedFile: DuplicateFileInfo? = nil
@@ -69,13 +84,13 @@ struct ContentView: View {
         VStack(spacing: 0) {
             // Top Bar
             HStack(spacing: 12) {
-                Button(action: { startProcess() }) {
+                Button(action: { startScanning() }) {
                     HStack {
-                        Image(systemName: scanner.isScanning ? "stop.circle.fill" : "play.circle.fill")
-                        Text(scanner.isScanning ? "Stop" : "Generate")
+                        Image(systemName: scanner.isScanning ? "stop.circle.fill" : "magnifyingglass.circle.fill")
+                        Text(scanner.isScanning ? "Stop" : "Search for Duplicates")
                     }
                     .fontWeight(.semibold)
-                    .frame(width: 100, height: 32)
+                    .frame(width: 180, height: 32)
                     .background(sourceURL == nil || scanner.isScanning ? Color.gray.opacity(0.3) : Color.blue)
                     .foregroundColor(.white)
                     .cornerRadius(6)
@@ -121,7 +136,29 @@ struct ContentView: View {
                     sortButton(label: "Size", criteria: .size)
                 }
             }
-            .padding(.bottom, 15).padding(.horizontal).frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, 10).padding(.horizontal).frame(maxWidth: .infinity, alignment: .leading)
+
+            // Statistics Bar
+            if scanner.totalPotentialSavings > 0 || scanner.totalRecovered > 0 {
+                HStack(spacing: 15) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "externaldrive.fill").font(.system(size: 10))
+                        Text("Potential Savings:").fontWeight(.bold)
+                        Text(scanner.formatBytes(scanner.totalPotentialSavings))
+                    }
+                    Rectangle().fill(Color.gray.opacity(0.3)).frame(width: 1, height: 10)
+                    HStack(spacing: 4) {
+                        Image(systemName: "sparkles").font(.system(size: 10))
+                        Text("Recovered:").fontWeight(.bold)
+                        Text(scanner.formatBytes(scanner.totalRecovered))
+                            .foregroundColor(.green)
+                    }
+                }
+                .font(.system(size: 10))
+                .padding(.horizontal)
+                .padding(.bottom, 12)
+                .foregroundColor(.secondary)
+            }
 
             if scanner.isScanning {
                 ProgressView(value: scanner.progress, total: 1.0)
@@ -146,8 +183,9 @@ struct ContentView: View {
                             ForEach(scanner.duplicateGroups) { group in
                                 let remainingCount = group.files.filter { !scanner.deletedPaths.contains($0.fullPath) }.count
                                 VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Text(group.name).fontWeight(.bold).font(.system(size: 11))
+                                    HStack(spacing: 6) {
+                                        FileIconView(path: group.files.first?.fullPath ?? "", size: 14)
+                                        Text(group.name).fontWeight(.bold).font(.system(size: 12))
                                         Text("(\(group.size))").font(.caption2).foregroundColor(.secondary)
                                         Spacer()
                                         Text("\(remainingCount) copies").font(.system(size: 9, weight: .bold))
@@ -158,10 +196,16 @@ struct ContentView: View {
                                     ForEach(group.files) { file in
                                         let fullPath = file.fullPath
                                         let isDeleted = scanner.deletedPaths.contains(fullPath)
-                                        HStack {
+                                        HStack(spacing: 8) {
                                             SelectionButton(file: file, selectedFile: $selectedFile, isDeleted: isDeleted)
                                             
                                             if !isDeleted {
+                                                Button(action: { NSWorkspace.shared.open(URL(fileURLWithPath: file.path)) }) {
+                                                    Image(systemName: "folder")
+                                                        .font(.system(size: 9)).foregroundColor(.gray)
+                                                }
+                                                .buttonStyle(.plain).help("Open folder in Finder")
+
                                                 Button(action: { if remainingCount > 1 { scanner.recycleFile(atPath: fullPath) } }) {
                                                     Image(systemName: remainingCount > 1 ? "trash" : "lock.fill")
                                                         .font(.system(size: 9)).foregroundColor(remainingCount > 1 ? .gray : .green.opacity(0.5))
@@ -205,7 +249,10 @@ struct ContentView: View {
 
             // Status Bar
             HStack {
-                Circle().fill(scanner.isScanning ? Color.green : (scanner.status.contains("Completed") || scanner.status.contains("Trash") ? Color.blue : Color.gray))
+                Circle().fill(
+                    scanner.status.contains("Error") ? Color.red :
+                    (scanner.isScanning ? Color.green : (scanner.status.contains("Completed") || scanner.status.contains("Trash") ? Color.blue : Color.gray))
+                )
                     .frame(width: 7, height: 7)
                 Text(scanner.status).font(.system(size: 10)).foregroundColor(.secondary)
                 Spacer()
@@ -239,14 +286,8 @@ struct ContentView: View {
         if panel.runModal() == .OK { self.sourceURL = panel.url }
     }
     
-    private func startProcess() {
+    private func startScanning() {
         guard let source = sourceURL else { return }
-        let savePanel = NSSavePanel(); savePanel.allowedContentTypes = [.plainText]; savePanel.nameFieldStringValue = "filelist.txt"
-        if savePanel.runModal() == .OK {
-            if let destination = savePanel.url {
-                self.destinationURL = destination
-                scanner.startScan(sourceURL: source, destinationURL: destination)
-            }
-        }
+        scanner.startScan(sourceURL: source)
     }
 }

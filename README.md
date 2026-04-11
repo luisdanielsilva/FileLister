@@ -31,7 +31,7 @@
 
 1.  **Select Source**: Click **"Select..."** to choose the folder or disk you want to audit.
 2.  **Toggle Analysis**: Choose between a quick scan (Name + Size) or a **Deep Scan** (SHA-256).
-3.  **Generate**: Click **"Generate"** to start the process. You will be asked to choose a location for the exported file list (`filelist.txt`).
+3.  **Search**: Click **"Search for Duplicates"** to start the scan immediately.
 4.  **Audit & Cleanup**:
     *   Browse the identified duplicate groups.
     *   Use **Space Bar** to preview a file.
