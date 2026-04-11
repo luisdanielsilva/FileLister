@@ -1,0 +1,48 @@
+{
+  "source": "/Users/luissilva/.gemini/antigravity/scratch/FileLister/FileLister/FileLister/LicenseView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "ABCD-1234-EFGH-5678",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 24
+        }
+      },
+      {
+        "comment": "",
+        "key": "Enter License Key",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 17
+        }
+      },
+      {
+        "comment": "",
+        "key": "Format: XXXX-YYYY-ZZZZ-WWWW",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 19
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 37
+        }
+      },
+      {
+        "comment": "",
+        "key": "Activate",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 42
+        }
+      }
+    ]
+  },
+  "version": 1
+}

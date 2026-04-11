@@ -2,35 +2,14 @@ import SwiftUI
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // We try several times to ensure the menu is inserted after system initialization
-        for delay in [0.2, 0.5, 1.0, 2.0] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                self.setupCustomMenu()
+        // We only prune the extra menus (File, Edit, etc.) to keep the UI minimal
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            if let mainMenu = NSApplication.shared.mainMenu {
+                while mainMenu.numberOfItems > 1 {
+                    mainMenu.removeItem(at: 1)
+                }
             }
         }
-    }
-    
-    private func setupCustomMenu() {
-        guard let mainMenu = NSApplication.shared.mainMenu else { return }
-        
-        // Ensure index 0 (App Menu) exists
-        if mainMenu.numberOfItems > 0, let appMenu = mainMenu.item(at: 0)?.submenu {
-            // Prune other menus if they reappeared
-            while mainMenu.numberOfItems > 1 {
-                mainMenu.removeItem(at: 1)
-            }
-            
-            // Insert "License Key..." if missing
-            if !appMenu.items.contains(where: { $0.title == "License Key..." }) {
-                let licenseItem = NSMenuItem(title: "License Key...", action: #selector(self.openLicenseSheet), keyEquivalent: "l")
-                licenseItem.target = self
-                appMenu.insertItem(licenseItem, at: 1)
-            }
-        }
-    }
-    
-    @objc func openLicenseSheet() {
-        NotificationCenter.default.post(name: NSNotification.Name("toggleLicenseSheet"), object: nil)
     }
 }
 
@@ -53,7 +32,6 @@ struct FileListerApp: App {
                 }
         }
         .commands {
-            // We empty the commands or leave only essential ones since we manage the App menu in AppDelegate
             CommandGroup(replacing: .appInfo) {
                 Button("About FileLister") {
                     let credits = NSAttributedString(
@@ -67,6 +45,13 @@ struct FileListerApp: App {
                     ]
                     NSApplication.shared.orderFrontStandardAboutPanel(options: options)
                 }
+                
+                Divider()
+                
+                Button("License Key...") {
+                    showingLicenseSheet = true
+                }
+                .keyboardShortcut("l", modifiers: .command)
             }
         }
     }

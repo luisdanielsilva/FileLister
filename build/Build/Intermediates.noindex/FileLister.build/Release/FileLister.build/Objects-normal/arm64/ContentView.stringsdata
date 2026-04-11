@@ -1,0 +1,248 @@
+{
+  "source": "/Users/luissilva/.gemini/antigravity/scratch/FileLister/FileLister/FileLister/ContentView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Confirm Batch Deletion?",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 346
+        }
+      },
+      {
+        "comment": "",
+        "key": "Register the application to use this feature",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 354
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 278
+        }
+      },
+      {
+        "comment": "",
+        "key": "Stop",
+        "location": {
+          "startingColumn": 51,
+          "startingLine": 101
+        }
+      },
+      {
+        "comment": "",
+        "key": "Search for Duplicates",
+        "location": {
+          "startingColumn": 60,
+          "startingLine": 101
+        }
+      },
+      {
+        "comment": "",
+        "key": "Select...",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 119
+        }
+      },
+      {
+        "comment": "",
+        "key": "Deep Scan",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 132
+        }
+      },
+      {
+        "comment": "",
+        "key": "Media",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 136
+        }
+      },
+      {
+        "comment": "",
+        "key": "No Hidden",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 140
+        }
+      },
+      {
+        "comment": "",
+        "key": "Clean All Duplicates",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 162
+        }
+      },
+      {
+        "comment": "",
+        "key": "Duplicate Groups found (%lld):",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 195
+        }
+      },
+      {
+        "comment": "",
+        "key": "Space to Preview",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 197
+        }
+      },
+      {
+        "comment": "",
+        "key": "Safety Lock Active",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 198
+        }
+      },
+      {
+        "comment": "",
+        "key": "(%@)",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 212
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld copies",
+        "location": {
+          "startingColumn": 46,
+          "startingLine": 214
+        }
+      },
+      {
+        "comment": "",
+        "key": "Open folder in Finder",
+        "location": {
+          "startingColumn": 75,
+          "startingLine": 230
+        }
+      },
+      {
+        "comment": "",
+        "key": "No duplicates found",
+        "location": {
+          "startingColumn": 105,
+          "startingLine": 268
+        }
+      },
+      {
+        "comment": "",
+        "key": "Select a folder to begin",
+        "location": {
+          "startingColumn": 129,
+          "startingLine": 268
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld%%",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 321
+        }
+      },
+      {
+        "comment": "",
+        "key": "Potential Savings:",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 302
+        }
+      },
+      {
+        "comment": "",
+        "key": "Recoveries:",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 310
+        }
+      },
+      {
+        "comment": "",
+        "key": "Trial Mode:",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 328
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld/15 used",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 329
+        }
+      },
+      {
+        "comment": "",
+        "key": "(Register App)",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 331
+        }
+      },
+      {
+        "comment": "",
+        "key": "Clean All",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 347
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 350
+        }
+      },
+      {
+        "comment": "",
+        "key": "⚠️ This action moves ALL detected duplicates to the Trash. This change is irreversible.\n\nNote: Original files (one per group) will be kept safe.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 352
+        }
+      },
+      {
+        "comment": "",
+        "key": "Register here",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 355
+        }
+      },
+      {
+        "comment": "",
+        "key": "OK",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 360
+        }
+      },
+      {
+        "comment": "",
+        "key": "You have reached the trial limit or are attempting a premium action. Please register to unlock unlimited access.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 362
+        }
+      }
+    ]
+  },
+  "version": 1
+}

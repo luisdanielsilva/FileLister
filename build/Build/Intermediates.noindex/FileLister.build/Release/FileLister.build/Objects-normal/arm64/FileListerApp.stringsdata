@@ -1,0 +1,24 @@
+{
+  "source": "/Users/luissilva/.gemini/antigravity/scratch/FileLister/FileLister/FileLister/FileListerApp.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "About FileLister",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 36
+        }
+      },
+      {
+        "comment": "",
+        "key": "License Key...",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 51
+        }
+      }
+    ]
+  },
+  "version": 1
+}

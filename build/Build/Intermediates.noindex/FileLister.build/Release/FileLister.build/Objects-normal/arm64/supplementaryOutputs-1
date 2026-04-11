@@ -1,0 +1,12 @@
+{
+  "/Users/luissilva/.gemini/antigravity/scratch/FileLister/FileLister/FileLister/ContentView.swift" : {
+    "abi-baseline-json" : "/Users/luissilva/.gemini/antigravity/scratch/FileLister/build/Build/Intermediates.noindex/FileLister.build/Release/FileLister.build/Objects-normal/arm64/FileLister.abi.json",
+    "const-values" : "/Users/luissilva/.gemini/antigravity/scratch/FileLister/build/Build/Intermediates.noindex/FileLister.build/Release/FileLister.build/Objects-normal/arm64/FileLister-primary.swiftconstvalues",
+    "dependencies" : "/Users/luissilva/.gemini/antigravity/scratch/FileLister/build/Build/Intermediates.noindex/FileLister.build/Release/FileLister.build/Objects-normal/arm64/FileLister-primary.d",
+    "diagnostics" : "/Users/luissilva/.gemini/antigravity/scratch/FileLister/build/Build/Intermediates.noindex/FileLister.build/Release/FileLister.build/Objects-normal/arm64/FileLister-primary.dia",
+    "objc-header" : "/Users/luissilva/.gemini/antigravity/scratch/FileLister/build/Build/Intermediates.noindex/FileLister.build/Release/FileLister.build/Objects-normal/arm64/FileLister-Swift.h",
+    "swiftdoc" : "/Users/luissilva/.gemini/antigravity/scratch/FileLister/build/Build/Intermediates.noindex/FileLister.build/Release/FileLister.build/Objects-normal/arm64/FileLister.swiftdoc",
+    "swiftmodule" : "/Users/luissilva/.gemini/antigravity/scratch/FileLister/build/Build/Intermediates.noindex/FileLister.build/Release/FileLister.build/Objects-normal/arm64/FileLister.swiftmodule",
+    "swiftsourceinfo" : "/Users/luissilva/.gemini/antigravity/scratch/FileLister/build/Build/Intermediates.noindex/FileLister.build/Release/FileLister.build/Objects-normal/arm64/FileLister.swiftsourceinfo"
+  }
+}

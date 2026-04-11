@@ -17,7 +17,8 @@ mkdir -p "$DIST_DIR"
 
 # 2. Build via xcodebuild
 echo "📦 Compiling project..."
-xcodebuild -scheme "$APP_NAME" \
+xcodebuild -project "FileLister/FileLister.xcodeproj" \
+           -scheme "$APP_NAME" \
            -configuration Release \
            -derivedDataPath "$BUILD_DIR" \
            build | grep -A 5 "error:"
