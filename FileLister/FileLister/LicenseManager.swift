@@ -31,10 +31,31 @@ class LicenseManager: ObservableObject {
     }
     
     func validate(key: String) -> Bool {
+        // 1. Basic Format Check (REGEX)
         let pattern = "^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$"
         let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive)
         let range = NSRange(location: 0, length: key.utf16.count)
-        return regex?.firstMatch(in: key, options: [], range: range) != nil
+        guard regex?.firstMatch(in: key, options: [], range: range) != nil else { return false }
+        
+        // 2. Cryptographic Checksum Validation
+        let parts = key.uppercased().split(separator: "-")
+        guard parts.count == 4 else { return false }
+        
+        let seed = parts[0] + parts[1] + parts[2]
+        let providedSignature = String(parts[3])
+        
+        // The Secret Salt (Keep this private)
+        let salt = "FileLister-Secret-Salt-2026-Porto"
+        
+        // Generate the expected signature
+        let inputString = seed + salt
+        let inputData = Data(inputString.utf8)
+        let hashed = SHA256.hash(data: inputData)
+        
+        // Extract first 4 chars of the hash as the signature
+        let expectedSignature = hashed.compactMap { String(format: "%02X", $0) }.joined().prefix(4)
+        
+        return providedSignature == expectedSignature
     }
     
     func recordDeletion() {
