@@ -30,6 +30,7 @@ struct FileListerApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("toggleLicenseSheet"))) { _ in
                     showingLicenseSheet = true
                 }
+                .navigationTitle(licenseManager.isRegistered ? "FileLister - Licensed to \(licenseManager.registeredName)" : "FileLister (Trial Version)")
         }
         .commands {
             CommandGroup(replacing: .appInfo) {
