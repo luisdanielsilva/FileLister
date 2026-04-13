@@ -305,6 +305,12 @@ h1 {
 .support-card { text-align: center; }
 .support-header { margin-bottom: 40px; }
 
+.highlight-price {
+    font-weight: 800;
+    font-size: 1.25em;
+    color: var(--primary);
+}
+
 .payment-options {
     display: flex;
     gap: 16px;
