@@ -180,3 +180,41 @@ document.getElementById('mailBtn').addEventListener('click', () => {
     
     window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
 });
+
+// --- Contact Form Logic ---
+
+document.getElementById('openContactBtn').addEventListener('click', () => {
+    document.getElementById('contactModal').classList.remove('hidden');
+});
+
+document.getElementById('closeContactBtn').addEventListener('click', () => {
+    document.getElementById('contactModal').classList.add('hidden');
+});
+
+document.getElementById('sendContactBtn').addEventListener('click', () => {
+    const name = document.getElementById('contactName').value.trim();
+    const email = document.getElementById('contactEmail').value.trim();
+    const message = document.getElementById('contactMessage').value.trim();
+
+    if (!name || !email || !message) {
+        alert("Por favor, preenche todos os campos para enviar a mensagem.");
+        return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        alert("Por favor, introduz um e-mail válido.");
+        return;
+    }
+
+    const subject = encodeURIComponent(`Contacto Single Use Apps: Mensagem de ${name}`);
+    const body = encodeURIComponent(`Nome: ${name}\nE-mail de contacto: ${email}\n\n--- Mensagem ---\n\n${message}`);
+    
+    window.location.href = `mailto:luisdanielsilva@gmail.com?subject=${subject}&body=${body}`;
+    
+    // Close modal and clear form
+    document.getElementById('contactModal').classList.add('hidden');
+    document.getElementById('contactName').value = '';
+    document.getElementById('contactEmail').value = '';
+    document.getElementById('contactMessage').value = '';
+});
