@@ -195,18 +195,18 @@ function sendContact() {
     const message = document.getElementById('contactMessage').value.trim();
 
     if (!name || !email || !message) {
-        alert("Por favor, preenche todos os campos para enviar a mensagem.");
+        alert("Please fill all fields to send your message.");
         return;
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-        alert("Por favor, introduz um e-mail válido.");
+        alert("Please enter a valid e-mail address.");
         return;
     }
 
-    const subject = encodeURIComponent(`Contacto Single Use Apps: Mensagem de ${name}`);
-    const body = encodeURIComponent(`Nome: ${name}\nE-mail de contacto: ${email}\n\n--- Mensagem ---\n\n${message}`);
+    const subject = encodeURIComponent(`Single Use Apps Contact: Message from ${name}`);
+    const body = encodeURIComponent(`Name: ${name}\nContact E-mail: ${email}\n\n--- Message ---\n\n${message}`);
     
     window.location.href = `mailto:luisdanielsilva@gmail.com?subject=${subject}&body=${body}`;
     
