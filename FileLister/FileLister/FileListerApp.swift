@@ -41,7 +41,8 @@ struct FileListerApp: App {
                     )
                     let options: [NSApplication.AboutPanelOptionKey: Any] = [
                         .credits: credits,
-                        .version: "1.0",
+                        .applicationVersion: "1.0",
+                        .version: "",
                         .applicationName: "FileLister"
                     ]
                     NSApplication.shared.orderFrontStandardAboutPanel(options: options)
