@@ -1,0 +1,40 @@
+# Guia de Gestão de Chaves de Licença - FileLister Pro
+
+Este documento descreve como gerar e gerir as chaves de licença para a sua aplicação.
+
+## 1. Como Gerar uma Chave Profissional
+Para gerar uma chave ligada ao nome e e-mail de um cliente, utilize o script automatizado:
+
+1. Abra o Terminal na pasta raiz da aplicação.
+2. Execute o seguinte comando (substituindo pelos dados do cliente):
+   
+   ```bash
+   swift generate_pro_license.swift "Nome do Cliente" "email@cliente.com"
+   ```
+
+3. O sistema irá:
+   - Gerar uma chave única de 24 caracteres.
+   - Abrir automaticamente o seu e-mail com o assunto e corpo da mensagem já preenchidos.
+   - Mostrar a chave no terminal para sua referência.
+
+## 2. O Algoritmo de Segurança (Salted SHA-256)
+A aplicação utiliza um algoritmo de "Assinatura Digital" para validar as chaves sem precisar de internet:
+
+- **Semente (Seed)**: Os primeiros 20 caracteres da chave são aleatórios.
+- **Sal Secreto (Salt)**: Uma palavra-passe secreta embutida no código ("FileLister-Secret-Salt-2026-Porto").
+- **Assinatura (WWWW)**: Os últimos 4 caracteres são derivados de um Hash SHA-256 da (Semente + Sal).
+- **Validação**: A aplicação refaz o cálculo localmente. Se o resultado coincidir com os últimos 4 caracteres da chave, a licença é aceite.
+
+## 3. Gestão na Aplicação (Modo Desenvolvedor)
+Para facilitar os seus testes:
+
+- **Ativação**: No menu `FileLister > License Key...`, insira o Nome e a Chave. O nome aparecerá na barra de título da janela.
+- **Desativação**: Se precisar de testar uma chave nova, abra o menu de licença e clique no botão vermelho **"Unregister Application"**. Isto limpará os registos e voltará ao modo Trial.
+
+## 4. Chave de Demonstração
+Pode usar esta chave para demonstrar a aplicação:
+- **Nome**: Luís Silva
+- **Chave**: A8L3-M9X2-P0Q4-S6T8-V1W2-F39D
+
+---
+*Gerado automaticamente pelo sistema de suporte do FileLister.*

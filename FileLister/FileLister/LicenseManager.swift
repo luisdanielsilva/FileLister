@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import CryptoKit
 
 class LicenseManager: ObservableObject {
     static let shared = LicenseManager()

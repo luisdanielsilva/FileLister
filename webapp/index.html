@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LS Developer Suite | Premium macOS Utilities</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="blob-container">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="glass-nav">
+        <div class="nav-content">
+            <div class="brand">LS <span>Suite</span></div>
+            <ul class="nav-links">
+                <li><a href="#hero">Home</a></li>
+                <li><a href="#apps">Applications</a></li>
+                <li><a href="#support">Get License</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section id="hero" class="hero-section">
+        <div class="container">
+            <h1 class="reveal">Elevate your <br><span class="gradient-text">macOS Experience.</span></h1>
+            <p class="hero-subtitle reveal">Premium utilities designed for performance, security, and pure elegance.</p>
+            <div class="hero-btns reveal">
+                <a href="#apps" class="primary-btn">Explore Suite</a>
+                <a href="#support" class="outline-btn">Get All Pro Keys</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Apps Gallery -->
+    <section id="apps" class="apps-section">
+        <div class="container">
+            <h2 class="section-title">The Collection</h2>
+            <div class="apps-grid">
+                <!-- FileLister -->
+                <div class="app-card" onclick="selectApp('filelister')">
+                    <div class="app-icon-bg">📁</div>
+                    <h3>FileLister Pro</h3>
+                    <p>Mathematical duplicate management with binary verification.</p>
+                    <div class="card-footer">
+                        <span>Ver. 1.1</span>
+                        <span class="badge">Popular</span>
+                    </div>
+                </div>
+                <!-- KnockApp -->
+                <div class="app-card" onclick="selectApp('knockapp')">
+                    <div class="app-icon-bg">🔊</div>
+                    <h3>KnockApp</h3>
+                    <p>Physics-based sound triggers via MacBook impact detection.</p>
+                    <div class="card-footer">
+                        <span>Ver. 2.0</span>
+                    </div>
+                </div>
+                <!-- BrightnessApp -->
+                <div class="app-card" onclick="selectApp('brightness')">
+                    <div class="app-icon-bg">☀️</div>
+                    <h3>BrightnessApp</h3>
+                    <p>Smooth, precise control for external and internal displays.</p>
+                    <div class="card-footer">
+                        <span>Ver. 1.0</span>
+                    </div>
+                </div>
+                <!-- LS System Pulse -->
+                <div class="app-card" onclick="selectApp('systempulse')">
+                    <div class="app-icon-bg">⚡</div>
+                    <h3>System Pulse</h3>
+                    <p>Real-time health monitor and memory optimization suite.</p>
+                    <div class="card-footer">
+                        <span class="badge-new">New</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- App Details View (Dynamic) -->
+    <section id="details" class="details-section hidden">
+        <div class="container">
+            <div class="details-content glass-card">
+                <button class="close-btn" onclick="hideDetails()">×</button>
+                <div class="details-header">
+                    <div id="detailIcon" class="large-icon">📁</div>
+                    <div>
+                        <h2 id="detailTitle">FileLister Pro</h2>
+                        <p id="detailTagline" class="tagline">The ultimate guardian of your storage.</p>
+                    </div>
+                </div>
+                <div class="details-body">
+                    <div class="features-list">
+                        <h4>Key Features</h4>
+                        <ul id="detailFeatures">
+                            <li>SHA-256 Cryptographic Hashing</li>
+                            <li>Final Binary Verification</li>
+                            <li>macOS Trash Integration</li>
+                        </ul>
+                    </div>
+                    <div class="detail-actions">
+                        <button class="primary-btn">Download Trial</button>
+                        <a href="#support" class="support-link">Get Pro Key →</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Support & License Section -->
+    <section id="support" class="support-section">
+        <div class="container">
+            <div class="support-card glass-card">
+                <div class="support-header">
+                    <h2>Support Development</h2>
+                    <p>Donate 5€ or more to unlock a Lifetime Pro License for any app.</p>
+                </div>
+                
+                <div class="payment-options">
+                    <div class="payment-btn paypal" onclick="simulatePayment('PayPal')">Pay with <span>PayPal</span></div>
+                    <div class="payment-btn stripe" onclick="simulatePayment('Stripe')">Pay with <span>Stripe</span></div>
+                </div>
+
+                <!-- Generator (Locked initially) -->
+                <div id="generatorContainer" class="generator-locked">
+                    <div class="lock-overlay">
+                        <div class="lock-icon">🔒</div>
+                        <p>Generator Locked. Support development to unlock.</p>
+                    </div>
+                    
+                    <div class="generator-content">
+                        <h3>Unlock Your Potential</h3>
+                        <div class="input-row">
+                            <input type="text" id="custName" placeholder="Full Name">
+                            <input type="email" id="custEmail" placeholder="E-mail Address">
+                        </div>
+                        <div class="input-row">
+                            <select id="appSelect">
+                                <option value="filelister">FileLister Pro</option>
+                                <option value="knockapp">KnockApp</option>
+                                <option value="brightness">BrightnessApp</option>
+                                <option value="systempulse">System Pulse</option>
+                            </select>
+                            <button id="generateBtn" class="primary-btn">Generate Key</button>
+                        </div>
+                        <div id="resultBox" class="key-result hidden">
+                            <code id="finalKey">XXXX-XXXX-XXXX-XXXX-XXXX-XXXX</code>
+                            <button class="copy-small" onclick="copyKey()">📋</button>
+                        </div>
+                        <button id="mailBtn" class="secondary-btn hidden">Send Key to Email</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2026 LS Developer Suite. Proudly made in Porto. 🇵🇹</p>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
