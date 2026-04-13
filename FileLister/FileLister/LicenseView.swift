@@ -75,14 +75,6 @@ struct LicenseView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(inputKey.isEmpty)
-                } else {
-                    Button("Unregister") {
-                        licenseManager.deactivate()
-                        statusMessage = "License removed."
-                        isError = false
-                    }
-                    .buttonStyle(.bordered)
-                    .foregroundColor(.red)
                 }
             }
         }
