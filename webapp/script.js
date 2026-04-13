@@ -181,17 +181,15 @@ document.getElementById('mailBtn').addEventListener('click', () => {
     window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
 });
 
-// --- Contact Form Logic ---
-
-document.getElementById('openContactBtn').addEventListener('click', () => {
+function openContact() {
     document.getElementById('contactModal').classList.remove('hidden');
-});
+}
 
-document.getElementById('closeContactBtn').addEventListener('click', () => {
+function closeContact() {
     document.getElementById('contactModal').classList.add('hidden');
-});
+}
 
-document.getElementById('sendContactBtn').addEventListener('click', () => {
+function sendContact() {
     const name = document.getElementById('contactName').value.trim();
     const email = document.getElementById('contactEmail').value.trim();
     const message = document.getElementById('contactMessage').value.trim();
@@ -212,9 +210,8 @@ document.getElementById('sendContactBtn').addEventListener('click', () => {
     
     window.location.href = `mailto:luisdanielsilva@gmail.com?subject=${subject}&body=${body}`;
     
-    // Close modal and clear form
-    document.getElementById('contactModal').classList.add('hidden');
+    closeContact();
     document.getElementById('contactName').value = '';
     document.getElementById('contactEmail').value = '';
     document.getElementById('contactMessage').value = '';
-});
+}

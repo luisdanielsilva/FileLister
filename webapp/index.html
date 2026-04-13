@@ -166,15 +166,15 @@
     <footer>
         <div class="container">
             <p>&copy; 2026 Single Use Apps. Proudly made in Portugal. 🇵🇹</p>
-            <button id="openContactBtn" class="outline-btn" style="margin-top: 20px; font-size: 12px; padding: 10px 20px;">💌 Formulário de Contacto</button>
+            <button class="outline-btn" style="margin-top: 20px; font-size: 12px; padding: 10px 20px;" onclick="openContact()">💌 Formulário de Contacto</button>
         </div>
     </footer>
 
     <!-- Contact Modal -->
     <section id="contactModal" class="details-section hidden">
         <div class="container">
-            <div class="details-content glass-card">
-                <button class="close-btn" id="closeContactBtn">×</button>
+            <div class="details-content glass-card" style="background: rgba(20, 20, 25, 0.95); border: 1px solid rgba(255,255,255,0.1); border-radius: 24px;">
+                <button class="close-btn" onclick="closeContact()">×</button>
                 <div class="details-header">
                     <div>
                         <h2>Contact Developer</h2>
@@ -194,12 +194,12 @@
                         <label>Mensagem</label>
                         <textarea id="contactMessage" rows="5" placeholder="Descreve o teu problema ou sugestão aqui..." style="background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); border-radius: 12px; padding: 14px 16px; color: white; width: 100%; font-family: inherit; font-size: 15px; resize: vertical; transition: all 0.3s;"></textarea>
                     </div>
-                    <button id="sendContactBtn" class="primary-btn" style="margin-top: 10px;">Enviar</button>
+                    <button class="primary-btn" style="margin-top: 10px;" onclick="sendContact()">Enviar</button>
                 </div>
             </div>
         </div>
     </section>
 
-    <script src="script.js?v=2"></script>
+    <script src="script.js?v=3"></script>
 </body>
 </html>
