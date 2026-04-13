@@ -366,16 +366,19 @@ h1 {
 
 .input-group {
     display: flex;
-    flex-direction: column;
-    margin-bottom: 16px;
-    text-align: left;
+    flex-direction: row;
+    align-items: flex-start;
+    margin-bottom: 20px;
+    width: 100%;
 }
 
 .input-group label {
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 700;
     color: var(--text-main);
-    margin-bottom: 8px;
+    width: 90px;
+    flex-shrink: 0;
+    margin-top: 12px;
 }
 
 input, select, textarea {
@@ -387,6 +390,17 @@ input, select, textarea {
     flex-grow: 1;
     width: 100%;
     font-family: inherit;
+    font-size: 14px;
+    transition: border-color 0.3s;
+}
+
+textarea {
+    resize: vertical;
+}
+
+input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--primary);
 }
 
 footer { padding: 64px 0; text-align: center; color: var(--text-dim); font-size: 13px; }
