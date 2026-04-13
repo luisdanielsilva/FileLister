@@ -9,7 +9,8 @@ const APPS = {
             "SHA-256 Cryptographic Hashing",
             "Final Binary Verification (Byte-by-Byte)",
             "Detailed Progress Monitoring",
-            "macOS Trash Integration"
+            "macOS Trash Integration",
+            "Safety Lock: Prevents total deletion"
         ]
     },
     knockapp: {
