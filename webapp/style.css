@@ -217,9 +217,10 @@ h1 {
 }
 
 .app-icon-bg {
-    font-size: 44px;
+    font-size: 64px;
     margin-bottom: 24px;
-    display: inline-block;
+    display: block;
+    text-align: center;
     filter: drop-shadow(0 0 10px rgba(0, 122, 255, 0.3));
 }
 
