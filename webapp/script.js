@@ -11,7 +11,8 @@ const APPS = {
             "Detailed Progress Monitoring",
             "macOS Trash Integration",
             "Safety Lock: Prevents total deletion"
-        ]
+        ],
+        downloadUrl: "FileLister_Professional_Bundle_v1.1.zip"
     },
     knockapp: {
         name: "KnockApp",
@@ -71,6 +72,16 @@ function selectApp(appId) {
     });
 
     document.getElementById('details').classList.remove('hidden');
+    
+    // Update download link
+    const downloadBtn = document.getElementById('detailDownload');
+    if (app.downloadUrl) {
+        downloadBtn.href = app.downloadUrl;
+        downloadBtn.style.display = "inline-block";
+        downloadBtn.innerText = "Download Trial";
+    } else {
+        downloadBtn.style.display = "none";
+    }
     
     // Auto-select in the generator dropdown for convenience
     document.getElementById('appSelect').value = appId;
