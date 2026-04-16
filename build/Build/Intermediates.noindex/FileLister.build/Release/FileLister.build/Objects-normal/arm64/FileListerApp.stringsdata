@@ -4,10 +4,26 @@
     "Localizable": [
       {
         "comment": "",
+        "key": "FileLister - Licensed to %@",
+        "location": {
+          "startingColumn": 64,
+          "startingLine": 33
+        }
+      },
+      {
+        "comment": "",
+        "key": "FileLister (Trial Version)",
+        "location": {
+          "startingColumn": 126,
+          "startingLine": 33
+        }
+      },
+      {
+        "comment": "",
         "key": "About FileLister",
         "location": {
           "startingColumn": 24,
-          "startingLine": 36
+          "startingLine": 37
         }
       },
       {
@@ -15,7 +31,7 @@
         "key": "License Key...",
         "location": {
           "startingColumn": 24,
-          "startingLine": 51
+          "startingLine": 53
         }
       }
     ]

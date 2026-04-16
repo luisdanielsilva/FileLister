@@ -33,7 +33,7 @@ if [ -d "$SOURCE_APP" ]; then
     
     # Create a ZIP for easy GitHub upload
     cd "$DIST_DIR"
-    zip -r "$APP_NAME-macOS.zip" "$APP_NAME.app"
+    zip -r "filelister.zip" "$APP_NAME.app"
     cd ..
     
     echo "--------------------------------------------------"

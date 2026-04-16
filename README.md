@@ -69,3 +69,9 @@ We are constantly planning new features. Here are the next steps:
 ---
 
 *Built with ❤️ for macOS users by Luís Silva.*
+
+---
+
+### 🌐 Project Ecosystem
+Looking for the **Single Use Apps** web portal and license generation engine? 
+The web infrastructure has been moved to its own dedicated repository: [SingleUseApps-Portal](https://github.com/luisdanielsilva/SingleUseApps-Portal)
