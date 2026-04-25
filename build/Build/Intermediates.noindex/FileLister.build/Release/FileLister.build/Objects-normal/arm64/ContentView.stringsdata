@@ -7,7 +7,15 @@
         "key": "Confirm Batch Deletion?",
         "location": {
           "startingColumn": 16,
-          "startingLine": 346
+          "startingLine": 420
+        }
+      },
+      {
+        "comment": "",
+        "key": "Confirm Deletion?",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 428
         }
       },
       {
@@ -15,7 +23,7 @@
         "key": "Register the application to use this feature",
         "location": {
           "startingColumn": 16,
-          "startingLine": 354
+          "startingLine": 441
         }
       },
       {
@@ -23,7 +31,7 @@
         "key": "",
         "location": {
           "startingColumn": 20,
-          "startingLine": 278
+          "startingLine": 352
         }
       },
       {
@@ -31,7 +39,7 @@
         "key": "Stop",
         "location": {
           "startingColumn": 51,
-          "startingLine": 101
+          "startingLine": 104
         }
       },
       {
@@ -39,7 +47,7 @@
         "key": "Search for Duplicates",
         "location": {
           "startingColumn": 60,
-          "startingLine": 101
+          "startingLine": 104
         }
       },
       {
@@ -47,7 +55,55 @@
         "key": "Select...",
         "location": {
           "startingColumn": 28,
-          "startingLine": 119
+          "startingLine": 122
+        }
+      },
+      {
+        "comment": "",
+        "key": "Move all marked duplicates to the Trash immediately.",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 229
+        }
+      },
+      {
+        "comment": "",
+        "key": "Compares file content (byte-by-byte) instead of just name and size. Slower but 100% accurate.",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 138
+        }
+      },
+      {
+        "comment": "",
+        "key": "Only show images, videos, and audio files.",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 144
+        }
+      },
+      {
+        "comment": "",
+        "key": "Exclude hidden system files and .DS_Store from the scan.",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 150
+        }
+      },
+      {
+        "comment": "",
+        "key": "Ext (e.g. xls)",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 166
+        }
+      },
+      {
+        "comment": "",
+        "key": "Filter by file extension (e.g. 'jpg', 'pdf', 'xlsx'). Leave empty for all types.",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 170
         }
       },
       {
@@ -55,7 +111,7 @@
         "key": "Deep Scan",
         "location": {
           "startingColumn": 31,
-          "startingLine": 132
+          "startingLine": 135
         }
       },
       {
@@ -63,7 +119,7 @@
         "key": "Media",
         "location": {
           "startingColumn": 31,
-          "startingLine": 136
+          "startingLine": 141
         }
       },
       {
@@ -71,15 +127,79 @@
         "key": "No Hidden",
         "location": {
           "startingColumn": 31,
-          "startingLine": 140
+          "startingLine": 147
         }
       },
       {
         "comment": "",
-        "key": "Clean All Duplicates",
+        "key": "",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 153
+        }
+      },
+      {
+        "comment": "",
+        "key": "Enable or disable session logging.",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 156
+        }
+      },
+      {
+        "comment": "",
+        "key": "Click to select a folder for scan logs",
+        "location": {
+          "startingColumn": 61,
+          "startingLine": 163
+        }
+      },
+      {
+        "comment": "",
+        "key": "Logging to: %@",
+        "location": {
+          "startingColumn": 104,
+          "startingLine": 163
+        }
+      },
+      {
+        "comment": "",
+        "key": "Log",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 159
+        }
+      },
+      {
+        "comment": "",
+        "key": "Sort groups by the number of duplicates found.",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 176
+        }
+      },
+      {
+        "comment": "",
+        "key": "Sort groups by file size.",
+        "location": {
+          "startingColumn": 31,
+          "startingLine": 178
+        }
+      },
+      {
+        "comment": "",
+        "key": "Automatic selection rule: Decide which file to keep in each duplicate group.",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 204
+        }
+      },
+      {
+        "comment": "",
+        "key": "Clean All Duplicates (%lld)",
         "location": {
           "startingColumn": 34,
-          "startingLine": 162
+          "startingLine": 219
         }
       },
       {
@@ -87,7 +207,7 @@
         "key": "Duplicate Groups found (%lld):",
         "location": {
           "startingColumn": 30,
-          "startingLine": 195
+          "startingLine": 254
         }
       },
       {
@@ -95,7 +215,7 @@
         "key": "Space to Preview",
         "location": {
           "startingColumn": 30,
-          "startingLine": 197
+          "startingLine": 256
         }
       },
       {
@@ -103,7 +223,7 @@
         "key": "Safety Lock Active",
         "location": {
           "startingColumn": 30,
-          "startingLine": 198
+          "startingLine": 257
         }
       },
       {
@@ -111,7 +231,7 @@
         "key": "(%@)",
         "location": {
           "startingColumn": 46,
-          "startingLine": 212
+          "startingLine": 271
         }
       },
       {
@@ -119,7 +239,7 @@
         "key": "%lld copies",
         "location": {
           "startingColumn": 46,
-          "startingLine": 214
+          "startingLine": 273
         }
       },
       {
@@ -127,7 +247,23 @@
         "key": "Open folder in Finder",
         "location": {
           "startingColumn": 75,
-          "startingLine": 230
+          "startingLine": 306
+        }
+      },
+      {
+        "comment": "",
+        "key": "Ignore",
+        "location": {
+          "startingColumn": 54,
+          "startingLine": 295
+        }
+      },
+      {
+        "comment": "",
+        "key": "",
+        "location": {
+          "startingColumn": 56,
+          "startingLine": 284
         }
       },
       {
@@ -135,7 +271,7 @@
         "key": "No duplicates found",
         "location": {
           "startingColumn": 105,
-          "startingLine": 268
+          "startingLine": 342
         }
       },
       {
@@ -143,7 +279,7 @@
         "key": "Select a folder to begin",
         "location": {
           "startingColumn": 129,
-          "startingLine": 268
+          "startingLine": 342
         }
       },
       {
@@ -151,7 +287,7 @@
         "key": "%lld%%",
         "location": {
           "startingColumn": 26,
-          "startingLine": 321
+          "startingLine": 395
         }
       },
       {
@@ -159,7 +295,7 @@
         "key": "Potential Savings:",
         "location": {
           "startingColumn": 34,
-          "startingLine": 302
+          "startingLine": 376
         }
       },
       {
@@ -167,7 +303,7 @@
         "key": "Recoveries:",
         "location": {
           "startingColumn": 34,
-          "startingLine": 310
+          "startingLine": 384
         }
       },
       {
@@ -175,7 +311,7 @@
         "key": "Trial Mode:",
         "location": {
           "startingColumn": 30,
-          "startingLine": 328
+          "startingLine": 402
         }
       },
       {
@@ -183,7 +319,7 @@
         "key": "%lld/15 used",
         "location": {
           "startingColumn": 30,
-          "startingLine": 329
+          "startingLine": 403
         }
       },
       {
@@ -191,7 +327,7 @@
         "key": "(Register App)",
         "location": {
           "startingColumn": 32,
-          "startingLine": 331
+          "startingLine": 405
         }
       },
       {
@@ -199,7 +335,7 @@
         "key": "Clean All",
         "location": {
           "startingColumn": 20,
-          "startingLine": 347
+          "startingLine": 421
         }
       },
       {
@@ -207,15 +343,39 @@
         "key": "Cancel",
         "location": {
           "startingColumn": 20,
-          "startingLine": 350
+          "startingLine": 424
         }
       },
       {
         "comment": "",
-        "key": "⚠️ This action moves ALL detected duplicates to the Trash. This change is irreversible.\n\nNote: Original files (one per group) will be kept safe.",
+        "key": "⚠️ This action moves %lld duplicate files to the Trash, recovering approximately %@ of space.\n\nThis change is irreversible. Original files (one per group) will be kept safe.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 352
+          "startingLine": 426
+        }
+      },
+      {
+        "comment": "",
+        "key": "Delete",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 429
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 435
+        }
+      },
+      {
+        "comment": "",
+        "key": "Are you sure you want to move this file to the Trash?\n\n%@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 438
         }
       },
       {
@@ -223,7 +383,7 @@
         "key": "Register here",
         "location": {
           "startingColumn": 20,
-          "startingLine": 355
+          "startingLine": 442
         }
       },
       {
@@ -231,7 +391,7 @@
         "key": "OK",
         "location": {
           "startingColumn": 20,
-          "startingLine": 360
+          "startingLine": 447
         }
       },
       {
@@ -239,7 +399,7 @@
         "key": "You have reached the trial limit or are attempting a premium action. Please register to unlock unlimited access.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 362
+          "startingLine": 449
         }
       }
     ]

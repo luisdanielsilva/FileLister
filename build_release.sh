@@ -39,8 +39,28 @@ if [ -d "$SOURCE_APP" ]; then
     echo "--------------------------------------------------"
     echo "🎉 READY FOR RELEASE!"
     echo "Location: $DIST_DIR/$APP_NAME.app"
-    echo "Zip for GitHub: $DIST_DIR/$APP_NAME-macOS.zip"
+    echo "Zip for GitHub: $DIST_DIR/filelister.zip"
     echo "--------------------------------------------------"
+
+    # --- NEW: Automated GitHub Release Upload (Robust Version) ---
+    if command -v /opt/homebrew/bin/gh &> /dev/null; then
+        echo "🚀 Preparing GitHub Release..."
+        
+        LATEST_TAG="v1.1.0"
+        echo "🚀 Creating/Updating release $LATEST_TAG..."
+        /opt/homebrew/bin/gh release create "$LATEST_TAG" --title "FileLister $LATEST_TAG" --notes "Release v1.1.0 - Features: Auto-scan, Ignore Flag, Log, Filter bar optimization, Enhanced UI." 2>/dev/null
+
+        echo "📦 Uploading filelister.zip to release $LATEST_TAG..."
+        /opt/homebrew/bin/gh release upload "$LATEST_TAG" "$DIST_DIR/filelister.zip" --clobber
+        
+        if [ $? -eq 0 ]; then
+            echo "✅ Upload Successful to $LATEST_TAG!"
+        else
+            echo "⚠️  Upload failed. Ensure you are logged in using 'gh auth login' and have repo permissions."
+        fi
+    else
+        echo "ℹ️  GitHub CLI (gh) not found at /opt/homebrew/bin/gh. Skipping automated upload."
+    fi
 else
     echo "❌ Error: Could not find the built .app. Please check if the Scheme name is '$APP_NAME'."
 fi

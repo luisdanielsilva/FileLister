@@ -51,18 +51,19 @@ struct SelectionButton: View {
     let file: DuplicateFileInfo
     @Binding var selectedFile: DuplicateFileInfo?
     let isDeleted: Bool
+    let isIgnored: Bool
     
     var body: some View {
         HStack(spacing: 6) {
             Text(file.path)
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(isDeleted ? .red : (selectedFile?.id == file.id ? .white : .secondary))
+                .foregroundColor(isDeleted ? .red : (isIgnored ? .secondary.opacity(0.5) : (selectedFile?.id == file.id ? .white : .secondary)))
                 .strikethrough(isDeleted)
             Spacer()
         }
         .padding(.vertical, 2)
         .padding(.horizontal, 4)
-        .background(selectedFile?.id == file.id ? Color.blue : Color.clear)
+        .background(selectedFile?.id == file.id ? Color.blue : (isIgnored ? Color.black.opacity(0.2) : Color.clear))
         .cornerRadius(3)
         .contentShape(Rectangle()) // Clickable area expansion
         .onTapGesture {
@@ -81,6 +82,8 @@ struct ContentView: View {
     // Selection state for Quick Look
     @State private var selectedFile: DuplicateFileInfo? = nil
     @State private var showingBatchDeleteConfirm = false
+    @State private var showingSingleDeleteConfirm = false
+    @State private var pendingDeletePath: String? = nil
     @State private var showingRegisterAlert = false
     
     var hasRemovableDuplicates: Bool {
@@ -126,25 +129,79 @@ struct ContentView: View {
             .padding().background(Color(NSColor.windowBackgroundColor))
             
             // Analysis Options + Sorting
-            HStack(spacing: 20) {
-                HStack(spacing: 15) {
+            HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     Toggle(isOn: $scanner.useDeepAnalysis) {
-                        Label("Deep Scan", systemImage: "checkmark.shield").font(.system(size: 10))
+                        Label("Deep Scan", systemImage: "cpu").font(.system(size: 10))
                     }
                     .toggleStyle(.checkbox).disabled(scanner.isScanning)
+                    .help("Compares file content (byte-by-byte) instead of just name and size. Slower but 100% accurate.")
+                    
                     Toggle(isOn: $scanner.filterMediaOnly) {
-                        Label("Media", systemImage: "photo.on.rectangle").font(.system(size: 10))
+                        Label("Media", systemImage: "film").font(.system(size: 10))
                     }
                     .toggleStyle(.checkbox).disabled(scanner.isScanning)
+                    .help("Only show images, videos, and audio files.")
+                    
                     Toggle(isOn: $scanner.skipHiddenFiles) {
                         Label("No Hidden", systemImage: "eye.slash").font(.system(size: 10))
                     }
                     .toggleStyle(.checkbox).disabled(scanner.isScanning)
+                    .help("Exclude hidden system files and .DS_Store from the scan.")
+
+                    HStack(spacing: 4) {
+                        Toggle("", isOn: $scanner.isLoggingEnabled)
+                            .toggleStyle(.checkbox)
+                            .disabled(scanner.isScanning || scanner.logFolderURL == nil)
+                            .help("Enable or disable session logging.")
+                        
+                        Button(action: { selectLogFolder() }) {
+                            Label("Log", systemImage: "doc.text").font(.system(size: 10))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(scanner.logFolderURL == nil ? .secondary : .blue)
+                        .help(scanner.logFolderURL == nil ? "Click to select a folder for scan logs" : "Logging to: \(scanner.logFolderURL!.path)")
+                    }
+
+                    TextField("Ext (e.g. xls)", text: $scanner.fileTypeFilter)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 10))
+                        .frame(width: 70)
+                        .help("Filter by file extension (e.g. 'jpg', 'pdf', 'xlsx'). Leave empty for all types.")
+                        .disabled(scanner.isScanning)
                 }
                 Divider().frame(height: 20)
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     sortButton(label: "Copies", criteria: .count)
+                        .help("Sort groups by the number of duplicates found.")
                     sortButton(label: "Size", criteria: .size)
+                        .help("Sort groups by file size.")
+                    
+                    Divider().frame(height: 20).padding(.horizontal, 4)
+                    
+                    Menu {
+                        ForEach(AutoSelectRule.allCases) { rule in
+                            Button(rule.rawValue) {
+                                scanner.autoSelectRule = rule
+                                scanner.applyAutoSelection()
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(scanner.autoSelectRule.rawValue)
+                                .font(.system(size: 10))
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.system(size: 8))
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.blue.opacity(0.1))
+                        .foregroundColor(.blue)
+                        .cornerRadius(4)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .frame(width: 140)
+                    .help("Automatic selection rule: Decide which file to keep in each duplicate group.")
                 }
                 
                 Spacer()
@@ -159,7 +216,7 @@ struct ContentView: View {
                     }) {
                         HStack(spacing: 4) {
                             Image(systemName: "trash.fill")
-                            Text("Clean All Duplicates")
+                            Text("Clean All Duplicates (\(scanner.totalDuplicatesCount))")
                         }
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.red)
@@ -168,6 +225,8 @@ struct ContentView: View {
                         .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.red.opacity(0.3), lineWidth: 1))
                     }
                     .buttonStyle(.plain)
+                    .disabled(scanner.duplicateGroups.isEmpty || scanner.isScanning)
+                    .help("Move all marked duplicates to the Trash immediately.")
                 }
             }
             .padding(.bottom, 10).padding(.horizontal).frame(maxWidth: .infinity, alignment: .leading)
@@ -204,7 +263,7 @@ struct ContentView: View {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 8) {
                             ForEach(scanner.duplicateGroups) { group in
-                                let remainingCount = group.files.filter { !scanner.deletedPaths.contains($0.fullPath) }.count
+                                let remainingCount = group.files.filter { !scanner.deletedPaths.contains($0.fullPath) && !scanner.ignoredPaths.contains($0.fullPath) }.count
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack(spacing: 6) {
                                         FileIconView(path: group.files.first?.fullPath ?? "", size: 14)
@@ -219,8 +278,25 @@ struct ContentView: View {
                                     ForEach(group.files) { file in
                                         let fullPath = file.fullPath
                                         let isDeleted = scanner.deletedPaths.contains(fullPath)
+                                        let isIgnored = scanner.ignoredPaths.contains(fullPath)
                                         HStack(spacing: 8) {
-                                            SelectionButton(file: file, selectedFile: $selectedFile, isDeleted: isDeleted)
+                                            HStack(spacing: 2) {
+                                                Toggle("", isOn: Binding(
+                                                    get: { isIgnored },
+                                                    set: { value in
+                                                        if value { scanner.ignoredPaths.insert(fullPath) }
+                                                        else { scanner.ignoredPaths.remove(fullPath) }
+                                                    }
+                                                ))
+                                                .toggleStyle(.checkbox)
+                                                .labelsHidden()
+                                                .disabled(isDeleted)
+                                                
+                                                Text("Ignore").font(.system(size: 7)).foregroundColor(.secondary)
+                                            }
+                                            .padding(.trailing, 2)
+
+                                            SelectionButton(file: file, selectedFile: $selectedFile, isDeleted: isDeleted, isIgnored: isIgnored)
                                             
                                             if !isDeleted {
                                                 Button(action: { NSWorkspace.shared.open(URL(fileURLWithPath: file.path)) }) {
@@ -232,10 +308,8 @@ struct ContentView: View {
                                                 Button(action: { 
                                                     if remainingCount > 1 { 
                                                         if licenseManager.canPerformFreeDeletion() {
-                                                            scanner.recycleFile(atPath: fullPath)
-                                                            // Note: In a real app, we'd only count successful deletions. 
-                                                            // For simplicity here, we record the attempt.
-                                                            licenseManager.recordDeletion()
+                                                            pendingDeletePath = fullPath
+                                                            showingSingleDeleteConfirm = true
                                                         } else {
                                                             showingRegisterAlert = true
                                                         }
@@ -262,11 +336,11 @@ struct ContentView: View {
                 Spacer()
                 if !scanner.isScanning && (scanner.status == "Ready to start" || scanner.duplicateGroups.isEmpty) {
                     Button(action: { selectSource() }) {
-                        VStack {
+                        VStack(spacing: 12) {
                             Image(systemName: scanner.duplicateGroups.isEmpty && !scanner.status.contains("Ready") ? "checkmark.circle" : "folder.badge.plus")
-                                .font(.system(size: 40)).foregroundColor(.gray.opacity(0.2))
+                                .font(.system(size: 80)).foregroundColor(.gray.opacity(0.2))
                             Text(scanner.duplicateGroups.isEmpty && !scanner.status.contains("Ready") ? "No duplicates found" : "Select a folder to begin")
-                                .font(.caption2).foregroundColor(.secondary)
+                                .font(.system(size: 18, weight: .medium)).foregroundColor(.secondary.opacity(0.6))
                         }
                     }
                     .buttonStyle(.plain)
@@ -342,14 +416,27 @@ struct ContentView: View {
             }
             .padding(.horizontal, 10).frame(height: 24).background(Color.gray.opacity(0.05)).overlay(Divider(), alignment: .top)
         }
-        .frame(minWidth: 700, minHeight: 520)
+        .frame(minWidth: 1020, minHeight: 520)
         .alert("Confirm Batch Deletion?", isPresented: $showingBatchDeleteConfirm) {
             Button("Clean All", role: .destructive) {
                 scanner.recycleAllDuplicates()
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("⚠️ This action moves ALL detected duplicates to the Trash. This change is irreversible.\n\nNote: Original files (one per group) will be kept safe.")
+            Text("⚠️ This action moves \(scanner.totalDuplicatesCount) duplicate files to the Trash, recovering approximately \(scanner.formattedCurrentSavings) of space.\n\nThis change is irreversible. Original files (one per group) will be kept safe.")
+        }
+        .alert("Confirm Deletion?", isPresented: $showingSingleDeleteConfirm) {
+            Button("Delete", role: .destructive) {
+                if let path = pendingDeletePath {
+                    scanner.recycleFile(atPath: path)
+                    licenseManager.recordDeletion()
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            if let path = pendingDeletePath {
+                Text("Are you sure you want to move this file to the Trash?\n\n\(path)")
+            }
         }
         .alert("Register the application to use this feature", isPresented: $showingRegisterAlert) {
             Button("Register here") {
@@ -381,11 +468,27 @@ struct ContentView: View {
     
     private func selectSource() {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK { self.sourceURL = panel.url }
+        if panel.runModal() == .OK {
+            self.sourceURL = panel.url
+            startScanning()
+        }
     }
     
     private func startScanning() {
         guard let source = sourceURL else { return }
         scanner.startScan(sourceURL: source)
+    }
+    
+    private func selectLogFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Select where to save the scan logs"
+        
+        if panel.runModal() == .OK {
+            scanner.logFolderURL = panel.url
+            scanner.isLoggingEnabled = true
+        }
     }
 }
