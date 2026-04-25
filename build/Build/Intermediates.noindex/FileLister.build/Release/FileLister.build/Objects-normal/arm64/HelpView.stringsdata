@@ -4,14 +4,6 @@
     "Localizable": [
       {
         "comment": "",
-        "key": "Tip: Hover your mouse over any button in the app to see a quick description of its function.",
-        "location": {
-          "startingColumn": 22,
-          "startingLine": 82
-        }
-      },
-      {
-        "comment": "",
         "key": "How to Find Duplicates",
         "location": {
           "startingColumn": 30,
@@ -20,7 +12,7 @@
       },
       {
         "comment": "",
-        "key": "A guide to using FileLister effectively",
+        "key": "Mastering the features of FileLister",
         "location": {
           "startingColumn": 30,
           "startingLine": 16
@@ -28,10 +20,18 @@
       },
       {
         "comment": "",
-        "key": "The main interface with filters and duplicate groups.",
+        "key": "💡 Pro Tip",
         "location": {
-          "startingColumn": 30,
-          "startingLine": 32
+          "startingColumn": 26,
+          "startingLine": 79
+        }
+      },
+      {
+        "comment": "",
+        "key": "Hover your mouse over any button in the main window to see a quick description of what it does.",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 81
         }
       }
     ]
