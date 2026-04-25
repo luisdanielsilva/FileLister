@@ -23,6 +23,11 @@
     "llvm-bc" : "/Users/luissilva/.gemini/antigravity/scratch/FileLister/build/Build/Intermediates.noindex/FileLister.build/Release/FileLister.build/Objects-normal/arm64/FileScanner.bc",
     "object" : "/Users/luissilva/.gemini/antigravity/scratch/FileLister/build/Build/Intermediates.noindex/FileLister.build/Release/FileLister.build/Objects-normal/arm64/FileScanner.o"
   },
+  "/Users/luissilva/.gemini/antigravity/scratch/FileLister/FileLister/FileLister/HelpView.swift" : {
+    "index-unit-output-path" : "/FileLister.build/Release/FileLister.build/Objects-normal/arm64/HelpView.o",
+    "llvm-bc" : "/Users/luissilva/.gemini/antigravity/scratch/FileLister/build/Build/Intermediates.noindex/FileLister.build/Release/FileLister.build/Objects-normal/arm64/HelpView.bc",
+    "object" : "/Users/luissilva/.gemini/antigravity/scratch/FileLister/build/Build/Intermediates.noindex/FileLister.build/Release/FileLister.build/Objects-normal/arm64/HelpView.o"
+  },
   "/Users/luissilva/.gemini/antigravity/scratch/FileLister/FileLister/FileLister/LicenseManager.swift" : {
     "index-unit-output-path" : "/FileLister.build/Release/FileLister.build/Objects-normal/arm64/LicenseManager.o",
     "llvm-bc" : "/Users/luissilva/.gemini/antigravity/scratch/FileLister/build/Build/Intermediates.noindex/FileLister.build/Release/FileLister.build/Objects-normal/arm64/LicenseManager.bc",

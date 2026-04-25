@@ -4,10 +4,18 @@
     "Localizable": [
       {
         "comment": "",
+        "key": "How to find duplicated files",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 42
+        }
+      },
+      {
+        "comment": "",
         "key": "FileLister - Licensed to %@",
         "location": {
           "startingColumn": 64,
-          "startingLine": 33
+          "startingLine": 39
         }
       },
       {
@@ -15,7 +23,7 @@
         "key": "FileLister (Trial Version)",
         "location": {
           "startingColumn": 126,
-          "startingLine": 33
+          "startingLine": 39
         }
       },
       {
@@ -23,7 +31,7 @@
         "key": "About FileLister",
         "location": {
           "startingColumn": 24,
-          "startingLine": 37
+          "startingLine": 49
         }
       },
       {
@@ -31,7 +39,15 @@
         "key": "License Key...",
         "location": {
           "startingColumn": 24,
-          "startingLine": 53
+          "startingLine": 65
+        }
+      },
+      {
+        "comment": "",
+        "key": "How to find duplicated files",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 72
         }
       }
     ]

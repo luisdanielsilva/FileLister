@@ -3,10 +3,15 @@ import SwiftUI
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // We only prune the extra menus (File, Edit, etc.) to keep the UI minimal
+        // We keep the App menu and the Help menu
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             if let mainMenu = NSApplication.shared.mainMenu {
-                while mainMenu.numberOfItems > 1 {
-                    mainMenu.removeItem(at: 1)
+                let itemsToRemove = mainMenu.items.filter { item in
+                    let title = item.title.lowercased()
+                    return title != "filelister" && title != "help"
+                }
+                for item in itemsToRemove {
+                    mainMenu.removeItem(item)
                 }
             }
         }
@@ -18,6 +23,7 @@ struct FileListerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var licenseManager = LicenseManager.shared
     @State private var showingLicenseSheet = false
+    @Environment(\.openWindow) private var openWindow
     
     var body: some Scene {
         WindowGroup {
@@ -32,6 +38,12 @@ struct FileListerApp: App {
                 }
                 .navigationTitle(licenseManager.isRegistered ? "FileLister - Licensed to \(licenseManager.registeredName)" : "FileLister (Trial Version)")
         }
+        
+        Window("How to find duplicated files", id: "help") {
+            HelpView()
+        }
+        .windowStyle(.hiddenTitleBar)
+        
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About FileLister") {
@@ -41,7 +53,7 @@ struct FileListerApp: App {
                     )
                     let options: [NSApplication.AboutPanelOptionKey: Any] = [
                         .credits: credits,
-                        .applicationVersion: "1.0",
+                        .applicationVersion: "1.1.0",
                         .version: "",
                         .applicationName: "FileLister"
                     ]
@@ -54,6 +66,12 @@ struct FileListerApp: App {
                     showingLicenseSheet = true
                 }
                 .keyboardShortcut("l", modifiers: .command)
+            }
+            
+            CommandGroup(replacing: .help) {
+                Button("How to find duplicated files") {
+                    openWindow(id: "help")
+                }
             }
         }
     }

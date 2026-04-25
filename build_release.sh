@@ -28,8 +28,9 @@ SOURCE_APP="$BUILD_DIR/Build/Products/Release/$APP_NAME.app"
 
 if [ -d "$SOURCE_APP" ]; then
     echo "✅ Build Successful!"
-    echo "📂 Copying app to $DIST_DIR..."
+    echo "📂 Copying app and resources to $DIST_DIR..."
     cp -R "$SOURCE_APP" "$DIST_DIR/"
+    cp "FileLister/FileLister/FileLister/Resources/screenshot.png" "$DIST_DIR/$APP_NAME.app/Contents/Resources/" 2>/dev/null
     
     # Create a ZIP for easy GitHub upload
     cd "$DIST_DIR"

@@ -1,0 +1,40 @@
+{
+  "source": "/Users/luissilva/.gemini/antigravity/scratch/FileLister/FileLister/FileLister/HelpView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Tip: Hover your mouse over any button in the app to see a quick description of its function.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 82
+        }
+      },
+      {
+        "comment": "",
+        "key": "How to Find Duplicates",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 13
+        }
+      },
+      {
+        "comment": "",
+        "key": "A guide to using FileLister effectively",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 16
+        }
+      },
+      {
+        "comment": "",
+        "key": "The main interface with filters and duplicate groups.",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 32
+        }
+      }
+    ]
+  },
+  "version": 1
+}
