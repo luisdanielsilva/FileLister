@@ -47,9 +47,9 @@ if [ -d "$SOURCE_APP" ]; then
     if command -v /opt/homebrew/bin/gh &> /dev/null; then
         echo "🚀 Preparing GitHub Release..."
         
-        LATEST_TAG="v1.1.0"
+        LATEST_TAG="v1.2.0"
         echo "🚀 Creating/Updating release $LATEST_TAG..."
-        /opt/homebrew/bin/gh release create "$LATEST_TAG" --title "FileLister $LATEST_TAG" --notes "Release v1.1.0 - Features: Auto-scan, Ignore Flag, Log, Filter bar optimization, Enhanced UI." 2>/dev/null
+        /opt/homebrew/bin/gh release create "$LATEST_TAG" --title "FileLister $LATEST_TAG" --notes "Release v1.2.0 - Features: New Secure Email-Bound Licensing System." 2>/dev/null
 
         echo "📦 Uploading filelister.zip to release $LATEST_TAG..."
         /opt/homebrew/bin/gh release upload "$LATEST_TAG" "$DIST_DIR/filelister.zip" --clobber

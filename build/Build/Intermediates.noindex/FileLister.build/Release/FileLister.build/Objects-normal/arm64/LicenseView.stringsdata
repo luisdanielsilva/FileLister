@@ -12,7 +12,7 @@
       },
       {
         "comment": "",
-        "key": "Enter your name and the 24-character key.",
+        "key": "Enter your email address and the 26-character key.",
         "location": {
           "startingColumn": 26,
           "startingLine": 21
@@ -20,7 +20,7 @@
       },
       {
         "comment": "",
-        "key": "Full Name",
+        "key": "Email Address",
         "location": {
           "startingColumn": 31,
           "startingLine": 27
@@ -28,7 +28,7 @@
       },
       {
         "comment": "",
-        "key": "XXXX-XXXX-XXXX-XXXX-XXXX-XXXX",
+        "key": "XXXX-XXXX-XXXX-XXXX-XXXX-XXXXXX",
         "location": {
           "startingColumn": 31,
           "startingLine": 31
