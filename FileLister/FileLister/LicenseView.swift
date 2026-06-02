@@ -4,7 +4,7 @@ struct LicenseView: View {
     @Binding var isPresented: Bool
     @EnvironmentObject var licenseManager: LicenseManager
     @State private var inputKey: String = ""
-    @State private var inputEmail: String = ""
+    @State private var inputName: String = ""
     @State private var statusMessage: String = ""
     @State private var isError: Bool = false
     
@@ -18,17 +18,17 @@ struct LicenseView: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Register FileLister")
                         .font(.headline)
-                    Text("Enter your email address and the 26-character key.")
+                    Text("Enter your name and the 24-character key.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
                 
                 VStack(spacing: 10) {
-                    TextField("Email Address", text: $inputEmail)
+                    TextField("Full Name", text: $inputName)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 250)
                         
-                    TextField("XXXX-XXXX-XXXX-XXXX-XXXX-XXXXXX", text: $inputKey)
+                    TextField("XXXX-XXXX-XXXX-XXXX-XXXX-XXXX", text: $inputKey)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 11, design: .monospaced))
                         .multilineTextAlignment(.center)
@@ -40,7 +40,7 @@ struct LicenseView: View {
                         .font(.headline)
                     Text("Licensed to:")
                         .font(.caption).foregroundColor(.secondary)
-                    Text(licenseManager.registeredEmail)
+                    Text(licenseManager.registeredName)
                         .font(.title3).fontWeight(.bold)
                     
                     Text(licenseManager.licenseKey)
@@ -64,7 +64,7 @@ struct LicenseView: View {
                 
                 if !licenseManager.isRegistered {
                     Button("Activate") {
-                        if licenseManager.register(key: inputKey, email: inputEmail) {
+                        if licenseManager.register(key: inputKey, name: inputName.isEmpty ? "Premium User" : inputName) {
                             statusMessage = "Successfully registered!"
                             isError = false
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { isPresented = false }
@@ -74,7 +74,15 @@ struct LicenseView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(inputKey.isEmpty || inputEmail.isEmpty || !inputEmail.contains("@"))
+                    .disabled(inputKey.isEmpty)
+                } else {
+                    Button("Unregister") {
+                        licenseManager.deactivate()
+                        statusMessage = "License removed."
+                        isError = false
+                    }
+                    .buttonStyle(.bordered)
+                    .foregroundColor(.red)
                 }
             }
         }
