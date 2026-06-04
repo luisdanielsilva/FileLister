@@ -5,11 +5,15 @@ import AppKit
 import CryptoKit
 
 enum SortCriteria {
-    case name, size, count
+    case name, size, count, matchRatio
 }
 
 enum SortOrderEnum {
     case ascending, descending
+}
+
+enum MergeNamePosition {
+    case prefix, suffix
 }
 
 struct DuplicateFileInfo: Identifiable, Hashable {
@@ -19,9 +23,43 @@ struct DuplicateFileInfo: Identifiable, Hashable {
     let size: String
     let sizeBytes: Int
     var isSymlink: Bool = false
+    var modificationDate: Date? = nil
 
     var fullPath: String {
         return (path as NSString).appendingPathComponent(name)
+    }
+}
+
+struct ConfidenceSignal {
+    let name: String
+    let score: Double    // 0.0–1.0
+    let weight: Double
+    let detail: String
+}
+
+struct DuplicateConfidence {
+    let overall: Double  // weighted sum, 0.0–1.0
+    let signals: [ConfidenceSignal]
+
+    var label: String {
+        switch overall {
+        case 0.75...: return "Very likely accidental"
+        case 0.5..<0.75: return "Probably accidental"
+        case 0.3..<0.5: return "Uncertain"
+        default: return "Possibly intentional"
+        }
+    }
+
+    var tooltipText: String {
+        var lines: [String] = [
+            "Confidence: \(Int(overall * 100))% — \(label)",
+            ""
+        ]
+        for s in signals {
+            lines.append("• \(s.name): \(Int(s.score * 100))%  (weight \(Int(s.weight * 100))%)")
+            lines.append("  \(s.detail)")
+        }
+        return lines.joined(separator: "\n")
     }
 }
 
@@ -32,6 +70,7 @@ struct DuplicateGroup: Identifiable {
     let sizeBytes: Int
     let files: [DuplicateFileInfo]
     var isSymlinkGroup: Bool = false
+    var confidence: DuplicateConfidence? = nil
 }
 
 struct FolderDuplicateGroup: Identifiable {
@@ -44,6 +83,28 @@ struct FolderDuplicateGroup: Identifiable {
     let matchRatio: Double                  // 0.5–1.0
     var totalSizeBytes: Int {
         matchedGroups.reduce(0) { $0 + $1.sizeBytes } + uniqueToB.reduce(0) { $0 + $1.sizeBytes }
+    }
+
+    var tooltipText: String {
+        let filesInA = matchedGroups.count + uniqueToA.count
+        let filesInB = matchedGroups.count + uniqueToB.count
+        let minCount = min(filesInA, filesInB)
+        let nameA = URL(fileURLWithPath: folderA).lastPathComponent
+        let nameB = URL(fileURLWithPath: folderB).lastPathComponent
+        return """
+        Folder Match Ratio: \(Int(matchRatio * 100))%
+
+        Formula: SHA-256 verified matches ÷ files in smaller folder
+          \(matchedGroups.count) matching files ÷ \(minCount) = \(Int(matchRatio * 100))%
+
+        • \(nameA): \(filesInA) file(s) total
+          — \(matchedGroups.count) shared, \(uniqueToA.count) unique
+        • \(nameB): \(filesInB) file(s) total
+          — \(matchedGroups.count) shared, \(uniqueToB.count) unique
+
+        Matching verified by SHA-256 hash comparison (byte-identical).
+        Unique files will be moved to \(nameA) on merge.
+        """
     }
 }
 
@@ -66,6 +127,13 @@ class FileScanner: ObservableObject {
     @Published var folderMatchThreshold: Double = 0.75
     @Published var folderDuplicateGroups: [FolderDuplicateGroup] = []
 
+    @Published var scanPhaseIndex: Int = 0
+    @Published var totalScanPhases: Int = 1
+
+    @Published var mergeNamePosition: MergeNamePosition = .suffix
+    @Published var mergeNameSeparator: String = " "
+    @Published var mergeNameContent: String = "merged"
+
     @Published var sortCriteria: SortCriteria = .name
     @Published var sortOrder: SortOrderEnum = .ascending
     
@@ -82,6 +150,8 @@ class FileScanner: ObservableObject {
         shouldStop = false
         isScanning = true
         progress = 0
+        scanPhaseIndex = 0
+        totalScanPhases = 1 + (useDeepAnalysis ? 1 : 0) + (detectFolderDuplicates ? 1 : 0)
         status = "Counting files..."
         duplicateGroups = []
         folderDuplicateGroups = []
@@ -112,7 +182,7 @@ class FileScanner: ObservableObject {
     
     private func performScan(sourceURL: URL) {
         let fileManager = FileManager.default
-        let keys: [URLResourceKey] = [.fileSizeKey, .typeIdentifierKey, .isDirectoryKey]
+        let keys: [URLResourceKey] = [.fileSizeKey, .typeIdentifierKey, .isDirectoryKey, .contentModificationDateKey]
 
         guard let enumerator = fileManager.enumerator(at: sourceURL, includingPropertiesForKeys: keys,
               options: [], errorHandler: { _, _ in return true }) else {
@@ -123,7 +193,7 @@ class FileScanner: ObservableObject {
         self.processedItems = 0
         var tracker: [String: [DuplicateFileInfo]] = [:]
         var symlinkTracker: [String: [DuplicateFileInfo]] = [:]  // keyed by target device:inode
-        var allFilesPerFolder: [String: [DuplicateFileInfo]] = []  // folder path → all files
+        var allFilesPerFolder: [String: [DuplicateFileInfo]] = [:]  // folder path → all files
 
         while let fileURL = enumerator.nextObject() as? URL {
             if shouldStop { break }
@@ -155,8 +225,9 @@ class FileScanner: ObservableObject {
                     if filterMediaOnly && !mediaExtensions.contains(ext) { continue }
                     let sizeInBytes = resourceValues.fileSize ?? 0
                     let sizeStr = formatSize(sizeInBytes)
+                    let modDate = resourceValues.contentModificationDate
                     let key = "\(name)_\(sizeInBytes)"
-                    let info = DuplicateFileInfo(path: path, name: name, size: sizeStr, sizeBytes: sizeInBytes)
+                    let info = DuplicateFileInfo(path: path, name: name, size: sizeStr, sizeBytes: sizeInBytes, modificationDate: modDate)
                     if tracker[key] != nil { tracker[key]?.append(info) } else { tracker[key] = [info] }
                     allFilesPerFolder[path, default: []].append(info)
                 }
@@ -180,12 +251,17 @@ class FileScanner: ObservableObject {
         groups.append(contentsOf: symlinkGroups)
         
         if useDeepAnalysis && !shouldStop && !groups.isEmpty {
-            DispatchQueue.main.async { self.status = "Deep Analysis (SHA-256)..." }
+            DispatchQueue.main.async {
+                self.scanPhaseIndex += 1
+                self.progress = 0
+                self.status = "Deep Analysis (SHA-256)..."
+            }
             groups = performDeepAnalysis(on: groups)
         }
         
         if !shouldStop {
             self.detectFolderDuplicatesIfNeeded(allFiles: allFilesPerFolder, groups: &groups)
+            self.computeConfidence(for: &groups, folderGroups: self.folderDuplicateGroups)
             DispatchQueue.main.async {
                 self.duplicateGroups = groups
                 self.totalPotentialSavings = groups.reduce(0) { $0 + Int64($1.sizeBytes) * Int64($1.files.count - 1) }
@@ -198,72 +274,194 @@ class FileScanner: ObservableObject {
         }
     }
     
+    private func computeConfidence(for groups: inout [DuplicateGroup], folderGroups: [FolderDuplicateGroup]) {
+        let copyPatterns = ["copy", "backup", "bak", " old", "_old", "archive", "temp", "(1)", "(2)", "(3)", "- copy", "_copy"]
+
+        for i in 0..<groups.count {
+            let files = groups[i].files
+            guard files.count > 1 else { continue }
+            let folders = files.map { $0.path }
+            var signals: [ConfidenceSignal] = []
+
+            // Signal 1 — Folder match ratio (weight 40%)
+            var folderMatchScore = 0.0
+            var folderMatchDetail = "No related folder pair detected"
+            for fg in folderGroups {
+                if folders.contains(fg.folderA) && folders.contains(fg.folderB) {
+                    if fg.matchRatio > folderMatchScore {
+                        folderMatchScore = fg.matchRatio
+                        let nA = URL(fileURLWithPath: fg.folderA).lastPathComponent
+                        let nB = URL(fileURLWithPath: fg.folderB).lastPathComponent
+                        folderMatchDetail = "\"\(nA)\" and \"\(nB)\" share \(Int(fg.matchRatio * 100))% of files"
+                    }
+                }
+            }
+            signals.append(ConfidenceSignal(name: "Folder similarity", score: folderMatchScore, weight: 0.35, detail: folderMatchDetail))
+
+            // Signal 2 — Folder name patterns (weight 25%)
+            var namePatternScore = 0.0
+            var namePatternDetail = "No copy/backup naming detected in parent folders"
+            for folder in folders {
+                let lower = URL(fileURLWithPath: folder).lastPathComponent.lowercased()
+                if copyPatterns.contains(where: { lower.contains($0) }) {
+                    namePatternScore = 1.0
+                    namePatternDetail = "Folder \"\(URL(fileURLWithPath: folder).lastPathComponent)\" suggests a copy or backup"
+                    break
+                }
+            }
+            signals.append(ConfidenceSignal(name: "Folder name pattern", score: namePatternScore, weight: 0.25, detail: namePatternDetail))
+
+            // Signal 3 — Timestamp match (weight 20%)
+            let dates = files.compactMap { $0.modificationDate }
+            var timestampScore = 0.0
+            var timestampDetail = "Modification dates unavailable"
+            if dates.count == files.count {
+                let diff = dates.max()!.timeIntervalSince(dates.min()!)
+                switch diff {
+                case ..<1:
+                    timestampScore = 1.0; timestampDetail = "All copies modified within 1 second (exact copy)"
+                case 1..<60:
+                    timestampScore = 0.8; timestampDetail = "All copies modified within 1 minute of each other"
+                case 60..<3600:
+                    timestampScore = 0.5; timestampDetail = "Copies modified within \(Int(diff/60)) minute(s) of each other"
+                case 3600..<86400:
+                    timestampScore = 0.3; timestampDetail = "Copies modified within \(Int(diff/3600)) hour(s) of each other"
+                default:
+                    timestampScore = 0.1; timestampDetail = "Copies modified \(Int(diff/86400)) day(s) apart — may be independently maintained"
+                }
+            }
+            signals.append(ConfidenceSignal(name: "Timestamp match", score: timestampScore, weight: 0.20, detail: timestampDetail))
+
+            // Signal 4 — Path proximity (weight 15%)
+            let pathComponents = folders.map { URL(fileURLWithPath: $0).pathComponents }
+            let minDepth = pathComponents.map { $0.count }.min() ?? 0
+            var commonDepth = 0
+            for d in 0..<minDepth {
+                if pathComponents.allSatisfy({ $0[d] == pathComponents[0][d] }) { commonDepth = d + 1 } else { break }
+            }
+            let maxDepth = pathComponents.map { $0.count }.max() ?? 1
+            let divergence = Double(maxDepth - commonDepth) / Double(max(1, maxDepth))
+            let pathScore = max(0.0, 1.0 - divergence)
+            let pathDetail: String
+            switch divergence {
+            case ..<0.2: pathDetail = "Files differ only at the last path segment — very close"
+            case 0.2..<0.5: pathDetail = "Files share most of their path (moderate divergence)"
+            default: pathDetail = "Files are in very different filesystem locations"
+            }
+            signals.append(ConfidenceSignal(name: "Path proximity", score: pathScore, weight: 0.10, detail: pathDetail))
+
+            // Signal 5 — Copy count (weight 10%)
+            let copyCount = files.count
+            let copyScore: Double
+            let copyDetail: String
+            switch copyCount {
+            case 2:
+                copyScore = 0.4; copyDetail = "2 copies — inconclusive on its own"
+            case 3...5:
+                copyScore = 0.65; copyDetail = "\(copyCount) copies — moderately suggests accidental duplication"
+            default:
+                copyScore = 0.85; copyDetail = "\(copyCount) copies — strongly suggests mass duplication"
+            }
+            signals.append(ConfidenceSignal(name: "Copy count", score: copyScore, weight: 0.10, detail: copyDetail))
+
+            let overall = signals.reduce(0.0) { $0 + $1.score * $1.weight }
+            groups[i].confidence = DuplicateConfidence(overall: overall, signals: signals)
+        }
+    }
+
     private func detectFolderDuplicatesIfNeeded(allFiles: [String: [DuplicateFileInfo]], groups: inout [DuplicateGroup]) {
         guard detectFolderDuplicates else { return }
 
-        // Count total files per folder
-        var folderFileCounts: [String: Int] = [:]
-        for (_, files) in allFiles {
-            for file in files {
-                folderFileCounts[file.path, default: 0] += 1
-            }
+        // Collect every scanned file and hash them all — no name+size pre-filter
+        let allFilesList = allFiles.values.flatMap { $0 }
+        let totalToHash = allFilesList.count
+        guard totalToHash > 0 else { return }
+
+        DispatchQueue.main.async {
+            self.scanPhaseIndex += 1
+            self.progress = 0
+            self.status = "Folder analysis: hashing files..."
         }
 
-        // For each duplicate group, record which folder pairs share it
-        // folderPairGroups: key = "folderA|folderB" (sorted), value = [DuplicateGroup]
-        var folderPairGroups: [String: [DuplicateGroup]] = [:]
-        var folderPairFolders: [String: (String, String)] = [:]
+        // Build hash → [DuplicateFileInfo] map by SHA-256 hashing every file
+        var hashGroups: [String: [DuplicateFileInfo]] = [:]
+        for (index, file) in allFilesList.enumerated() {
+            if shouldStop { return }
+            DispatchQueue.main.async {
+                self.progress = Double(index) / Double(totalToHash)
+                self.status = "Folder SHA-256: \(file.name)"
+            }
+            guard let hash = calculateSHA256(for: file.fullPath) else { continue }
+            hashGroups[hash, default: []].append(file)
+        }
 
-        for group in groups {
-            let folders = Set(group.files.map { $0.path })
+        DispatchQueue.main.async { self.progress = 1.0 }
+
+        // Count total files per folder
+        var folderFileCounts: [String: Int] = [:]
+        for (folder, files) in allFiles { folderFileCounts[folder] = files.count }
+
+        // Build folder pair → shared hash set from hash groups with 2+ files across different folders
+        var folderPairHashes: [String: Set<String>] = [:]
+        var folderPairFolders: [String: (String, String)] = [:]
+        var hashToFiles: [String: [DuplicateFileInfo]] = [:]
+
+        for (hash, files) in hashGroups {
+            guard files.count > 1 else { continue }
+            let folders = Set(files.map { $0.path })
+            guard folders.count > 1 else { continue }
+            hashToFiles[hash] = files
             let folderArray = Array(folders).sorted()
             for i in 0..<folderArray.count {
                 for j in (i+1)..<folderArray.count {
                     let a = folderArray[i], b = folderArray[j]
                     let key = "\(a)|\(b)"
-                    folderPairGroups[key, default: []].append(group)
+                    folderPairHashes[key, default: []].insert(hash)
                     folderPairFolders[key] = (a, b)
                 }
             }
         }
 
         var detectedFolderGroups: [FolderDuplicateGroup] = []
-        var consumedGroupIDs: Set<UUID> = []
 
-        for (key, sharedGroups) in folderPairGroups {
+        for (key, hashes) in folderPairHashes {
             guard let (rawA, rawB) = folderPairFolders[key] else { continue }
             let countA = folderFileCounts[rawA] ?? 0
             let countB = folderFileCounts[rawB] ?? 0
             let minCount = min(countA, countB)
             guard minCount > 0 else { continue }
 
-            let ratio = Double(sharedGroups.count) / Double(minCount)
+            let ratio = Double(hashes.count) / Double(minCount)
             guard ratio >= folderMatchThreshold else { continue }
 
-            // folderA = the one with more files (the "keep" side)
             let (folderA, folderB) = countA >= countB ? (rawA, rawB) : (rawB, rawA)
 
-            let sharedFileNamesAndSizes = Set(sharedGroups.map { "\($0.name)_\($0.sizeBytes)" })
+            let verifiedGroups: [DuplicateGroup] = hashes.compactMap { hash in
+                guard let files = hashToFiles[hash] else { return nil }
+                let f = files[0]
+                return DuplicateGroup(name: f.name, size: f.size, sizeBytes: f.sizeBytes, files: files)
+            }
 
-            let uniqueToA = (allFiles[folderA] ?? []).filter {
-                !sharedFileNamesAndSizes.contains("\($0.name)_\($0.sizeBytes)")
-            }
-            let uniqueToB = (allFiles[folderB] ?? []).filter {
-                !sharedFileNamesAndSizes.contains("\($0.name)_\($0.sizeBytes)")
-            }
+            let sharedKeys = Set(verifiedGroups.map { "\($0.name)_\($0.sizeBytes)" })
+            let uniqueToA = (allFiles[folderA] ?? []).filter { !sharedKeys.contains("\($0.name)_\($0.sizeBytes)") }
+            let uniqueToB = (allFiles[folderB] ?? []).filter { !sharedKeys.contains("\($0.name)_\($0.sizeBytes)") }
 
             detectedFolderGroups.append(FolderDuplicateGroup(
                 folderA: folderA, folderB: folderB,
-                matchedGroups: sharedGroups,
+                matchedGroups: verifiedGroups,
                 uniqueToA: uniqueToA, uniqueToB: uniqueToB,
                 matchRatio: ratio
             ))
-            sharedGroups.forEach { consumedGroupIDs.insert($0.id) }
         }
 
-        // Remove individual file groups that were fully consumed by a folder group
-        groups = groups.filter { !consumedGroupIDs.contains($0.id) }
-        folderDuplicateGroups = detectedFolderGroups
+        // Remove name+size duplicate groups whose files are covered by a detected folder pair
+        groups = groups.filter { group in
+            let fileFolders = Set(group.files.map { $0.path })
+            return !detectedFolderGroups.contains { fg in
+                fileFolders.contains(fg.folderA) && fileFolders.contains(fg.folderB)
+            }
+        }
+        folderDuplicateGroups = detectedFolderGroups.sorted { $0.matchRatio > $1.matchRatio }
     }
 
     func toggleSort(criteria: SortCriteria) {
@@ -285,6 +483,19 @@ class FileScanner: ObservableObject {
                 let countA = a.files.filter { !deletedPaths.contains($0.fullPath) }.count
                 let countB = b.files.filter { !deletedPaths.contains($0.fullPath) }.count
                 result = countA < countB
+            case .matchRatio:
+                result = (a.confidence?.overall ?? 0) < (b.confidence?.overall ?? 0)
+            }
+            return (sortOrder == .ascending) ? result : !result
+        }
+
+        folderDuplicateGroups.sort { (a, b) -> Bool in
+            let result: Bool
+            switch sortCriteria {
+            case .name: result = URL(fileURLWithPath: a.folderA).lastPathComponent < URL(fileURLWithPath: b.folderA).lastPathComponent
+            case .size: result = a.totalSizeBytes < b.totalSizeBytes
+            case .count: result = a.matchedGroups.count < b.matchedGroups.count
+            case .matchRatio: result = a.matchRatio < b.matchRatio
             }
             return (sortOrder == .ascending) ? result : !result
         }
@@ -506,6 +717,26 @@ class FileScanner: ObservableObject {
         }
     }
     
+    func computeMergedFolderName(folderA: String, folderB: String) -> String {
+        let nameA = URL(fileURLWithPath: folderA).lastPathComponent
+        let nameB = URL(fileURLWithPath: folderB).lastPathComponent
+
+        // Longest common prefix (case-insensitive comparison, preserve original casing from nameA)
+        var commonLength = 0
+        for (a, b) in zip(nameA.lowercased(), nameB.lowercased()) {
+            if a == b { commonLength += 1 } else { break }
+        }
+        let common = String(nameA.prefix(commonLength))
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(.init(charactersIn: "-_()[]")))
+
+        let base = common.count >= 3 ? common : nameA
+
+        guard !mergeNameContent.isEmpty else { return base }
+        return mergeNamePosition == .suffix
+            ? "\(base)\(mergeNameSeparator)\(mergeNameContent)"
+            : "\(mergeNameContent)\(mergeNameSeparator)\(base)"
+    }
+
     func mergeFolder(_ folderGroup: FolderDuplicateGroup) {
         self.isScanning = true
         self.status = "Merging folders..."
@@ -549,19 +780,100 @@ class FileScanner: ObservableObject {
             let folderBURL = URL(fileURLWithPath: folderGroup.folderB)
             NSWorkspace.shared.recycle([folderBURL]) { _, _ in }
 
+            // Step 4: rename folderA to the computed merged name
+            let parentDir = URL(fileURLWithPath: folderGroup.folderA).deletingLastPathComponent()
+            let computedName = self.computeMergedFolderName(folderA: folderGroup.folderA, folderB: folderGroup.folderB)
+            var destURL = parentDir.appendingPathComponent(computedName)
+            var suffix = 2
+            while fileManager.fileExists(atPath: destURL.path) {
+                destURL = parentDir.appendingPathComponent("\(computedName)_\(suffix)")
+                suffix += 1
+            }
+            try? fileManager.moveItem(at: URL(fileURLWithPath: folderGroup.folderA), to: destURL)
+
             DispatchQueue.main.async {
                 self.folderDuplicateGroups.removeAll { $0.id == folderGroup.id }
-                // Mark all matched files in B as deleted in the deletedPaths set
                 for file in folderGroup.matchedGroups.flatMap({ $0.files }) where file.path == folderGroup.folderB {
                     self.deletedPaths.insert(file.fullPath)
                 }
                 self.totalRecovered += Int64(folderGroup.totalSizeBytes)
                 self.isScanning = false
                 if errors.isEmpty {
-                    self.status = "Merge complete. \(folderGroup.folderB) moved to Trash."
+                    self.status = "Merge complete → \"\(destURL.lastPathComponent)\""
                 } else {
                     self.status = "Merge done with \(errors.count) error(s): \(errors.prefix(2).joined(separator: ", "))"
                 }
+            }
+        }
+    }
+
+    func mergeAllFolders() {
+        let groups = folderDuplicateGroups
+        guard !groups.isEmpty else { return }
+        self.isScanning = true
+        self.status = "Merging all folder pairs..."
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let fileManager = FileManager.default
+            var mergedCount = 0
+            var errorCount = 0
+
+            for (index, folderGroup) in groups.enumerated() {
+                DispatchQueue.main.async {
+                    self.status = "Merging pair \(index + 1)/\(groups.count)..."
+                    self.progress = Double(index) / Double(groups.count)
+                }
+
+                // Step 1: move unique files from B → A
+                for file in folderGroup.uniqueToB {
+                    let srcURL = URL(fileURLWithPath: file.fullPath)
+                    var destName = file.name
+                    var destURL = URL(fileURLWithPath: folderGroup.folderA).appendingPathComponent(destName)
+                    if fileManager.fileExists(atPath: destURL.path) {
+                        let ext = srcURL.pathExtension
+                        let base = ext.isEmpty ? destName : String(destName.dropLast(ext.count + 1))
+                        destName = ext.isEmpty ? "\(base)_merged" : "\(base)_merged.\(ext)"
+                        destURL = URL(fileURLWithPath: folderGroup.folderA).appendingPathComponent(destName)
+                    }
+                    if (try? fileManager.moveItem(at: srcURL, to: destURL)) == nil { errorCount += 1 }
+                }
+
+                // Step 2: trash matched files in B
+                let filesToTrash = folderGroup.matchedGroups
+                    .flatMap { $0.files }
+                    .filter { $0.path == folderGroup.folderB }
+                    .map { URL(fileURLWithPath: $0.fullPath) }
+                if !filesToTrash.isEmpty { NSWorkspace.shared.recycle(filesToTrash, completionHandler: nil) }
+
+                // Step 3: trash folder B
+                NSWorkspace.shared.recycle([URL(fileURLWithPath: folderGroup.folderB)], completionHandler: nil)
+
+                // Step 4: rename folder A
+                let parentDir = URL(fileURLWithPath: folderGroup.folderA).deletingLastPathComponent()
+                let computedName = self.computeMergedFolderName(folderA: folderGroup.folderA, folderB: folderGroup.folderB)
+                var destURL = parentDir.appendingPathComponent(computedName)
+                var suffix = 2
+                while fileManager.fileExists(atPath: destURL.path) {
+                    destURL = parentDir.appendingPathComponent("\(computedName)_\(suffix)")
+                    suffix += 1
+                }
+                try? fileManager.moveItem(at: URL(fileURLWithPath: folderGroup.folderA), to: destURL)
+
+                DispatchQueue.main.async {
+                    self.folderDuplicateGroups.removeAll { $0.id == folderGroup.id }
+                    for file in folderGroup.matchedGroups.flatMap({ $0.files }) where file.path == folderGroup.folderB {
+                        self.deletedPaths.insert(file.fullPath)
+                    }
+                    self.totalRecovered += Int64(folderGroup.totalSizeBytes)
+                }
+                mergedCount += 1
+            }
+
+            DispatchQueue.main.async {
+                self.isScanning = false
+                self.progress = 1.0
+                let errMsg = errorCount > 0 ? " (\(errorCount) errors)" : ""
+                self.status = "Merged \(mergedCount) folder pair(s)\(errMsg)."
             }
         }
     }
