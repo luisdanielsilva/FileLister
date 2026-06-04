@@ -82,6 +82,7 @@ struct ContentView: View {
     @State private var selectedFile: DuplicateFileInfo? = nil
     @State private var showingBatchDeleteConfirm = false
     @State private var showingRegisterAlert = false
+    @State private var folderGroupToMerge: FolderDuplicateGroup? = nil
     
     var hasRemovableDuplicates: Bool {
         for group in scanner.duplicateGroups {
@@ -144,6 +145,19 @@ struct ContentView: View {
                         Label("Symlinks", systemImage: "link").font(.system(size: 10))
                     }
                     .toggleStyle(.checkbox).disabled(scanner.isScanning)
+                    Toggle(isOn: $scanner.detectFolderDuplicates) {
+                        Label("Folders", systemImage: "folder.badge.questionmark").font(.system(size: 10))
+                    }
+                    .toggleStyle(.checkbox).disabled(scanner.isScanning)
+                    if scanner.detectFolderDuplicates {
+                        HStack(spacing: 4) {
+                            Text("Match:").font(.system(size: 10)).foregroundColor(.secondary)
+                            Slider(value: $scanner.folderMatchThreshold, in: 0.5...1.0, step: 0.05)
+                                .frame(width: 80)
+                                .disabled(scanner.isScanning)
+                            Text("\(Int(scanner.folderMatchThreshold * 100))%").font(.system(size: 10, weight: .medium)).frame(width: 28)
+                        }
+                    }
                 }
                 Divider().frame(height: 20)
                 HStack(spacing: 8) {
@@ -193,10 +207,10 @@ struct ContentView: View {
             }
 
             // Duplicates List
-            if !scanner.duplicateGroups.isEmpty {
+            if !scanner.duplicateGroups.isEmpty || !scanner.folderDuplicateGroups.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
-                        Text("Duplicate Groups found (\(scanner.duplicateGroups.count)):").font(.caption).fontWeight(.bold)
+                        Text("Duplicate Groups found (\(scanner.duplicateGroups.count + scanner.folderDuplicateGroups.count)):").font(.caption).fontWeight(.bold)
                         Spacer()
                         Text("Space to Preview").font(.system(size: 8, weight: .bold)).foregroundColor(.blue)
                         Text("Safety Lock Active").font(.system(size: 9, weight: .bold)).foregroundColor(.orange)
@@ -207,6 +221,64 @@ struct ContentView: View {
                     
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 8) {
+                            ForEach(scanner.folderDuplicateGroups) { folderGroup in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "folder.badge.questionmark")
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundColor(.indigo)
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(URL(fileURLWithPath: folderGroup.folderA).lastPathComponent)
+                                                .fontWeight(.bold).font(.system(size: 12))
+                                            Text(folderGroup.folderA)
+                                                .font(.system(size: 9, design: .monospaced)).foregroundColor(.secondary)
+                                                .lineLimit(1).truncationMode(.middle)
+                                        }
+                                        Image(systemName: "arrow.left.arrow.right")
+                                            .font(.system(size: 9)).foregroundColor(.secondary)
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(URL(fileURLWithPath: folderGroup.folderB).lastPathComponent)
+                                                .fontWeight(.bold).font(.system(size: 12))
+                                            Text(folderGroup.folderB)
+                                                .font(.system(size: 9, design: .monospaced)).foregroundColor(.secondary)
+                                                .lineLimit(1).truncationMode(.middle)
+                                        }
+                                        Spacer()
+                                        Text("\(Int(folderGroup.matchRatio * 100))% match")
+                                            .font(.system(size: 9, weight: .bold))
+                                            .foregroundColor(.indigo)
+                                            .padding(.horizontal, 5).padding(.vertical, 1)
+                                            .background(Color.indigo.opacity(0.1)).cornerRadius(3)
+                                    }
+                                    HStack(spacing: 12) {
+                                        Text("\(folderGroup.matchedGroups.count) shared files")
+                                            .font(.system(size: 9)).foregroundColor(.secondary)
+                                        if !folderGroup.uniqueToB.isEmpty {
+                                            Text("\(folderGroup.uniqueToB.count) unique to merge")
+                                                .font(.system(size: 9)).foregroundColor(.secondary)
+                                        }
+                                        Text(scanner.formatBytes(Int64(folderGroup.totalSizeBytes)))
+                                            .font(.system(size: 9, weight: .medium)).foregroundColor(.secondary)
+                                        Spacer()
+                                        Button(action: { folderGroupToMerge = folderGroup }) {
+                                            HStack(spacing: 4) {
+                                                Image(systemName: "arrow.triangle.merge")
+                                                Text("Merge & Clean")
+                                            }
+                                            .font(.system(size: 10, weight: .bold))
+                                            .foregroundColor(.indigo)
+                                            .padding(.horizontal, 10).padding(.vertical, 4)
+                                            .background(Color.indigo.opacity(0.1)).cornerRadius(5)
+                                            .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.indigo.opacity(0.3), lineWidth: 1))
+                                        }
+                                        .buttonStyle(.plain)
+                                        .disabled(scanner.isScanning)
+                                    }
+                                    .padding(.leading, 4)
+                                }
+                                .padding(6).background(Color.indigo.opacity(0.06)).cornerRadius(4)
+                            }
+
                             ForEach(scanner.duplicateGroups) { group in
                                 let remainingCount = group.files.filter { !scanner.deletedPaths.contains($0.fullPath) }.count
                                 VStack(alignment: .leading, spacing: 4) {
@@ -367,6 +439,20 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("⚠️ This action moves ALL detected duplicates to the Trash. This change is irreversible.\n\nNote: Original files (one per group) will be kept safe.")
+        }
+        .alert("Merge & Clean Folders?", isPresented: Binding(
+            get: { folderGroupToMerge != nil },
+            set: { if !$0 { folderGroupToMerge = nil } }
+        )) {
+            Button("Merge & Clean", role: .destructive) {
+                if let fg = folderGroupToMerge { scanner.mergeFolder(fg) }
+                folderGroupToMerge = nil
+            }
+            Button("Cancel", role: .cancel) { folderGroupToMerge = nil }
+        } message: {
+            if let fg = folderGroupToMerge {
+                Text("Merge \"\(URL(fileURLWithPath: fg.folderB).lastPathComponent)\" into \"\(URL(fileURLWithPath: fg.folderA).lastPathComponent)\"?\n\n• \(fg.matchedGroups.count) duplicate files moved to Trash\n• \(fg.uniqueToB.count) unique files moved to \(URL(fileURLWithPath: fg.folderA).lastPathComponent)\n• \(URL(fileURLWithPath: fg.folderB).lastPathComponent) deleted after merge")
+            }
         }
         .alert("Register the application to use this feature", isPresented: $showingRegisterAlert) {
             Button("Register here") {

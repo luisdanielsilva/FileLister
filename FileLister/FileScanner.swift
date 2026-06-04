@@ -34,6 +34,19 @@ struct DuplicateGroup: Identifiable {
     var isSymlinkGroup: Bool = false
 }
 
+struct FolderDuplicateGroup: Identifiable {
+    let id = UUID()
+    let folderA: String                     // folder to keep
+    let folderB: String                     // folder to merge into A then trash
+    let matchedGroups: [DuplicateGroup]     // file groups shared between A and B
+    let uniqueToA: [DuplicateFileInfo]      // files only in A
+    let uniqueToB: [DuplicateFileInfo]      // files only in B — moved to A on merge
+    let matchRatio: Double                  // 0.5–1.0
+    var totalSizeBytes: Int {
+        matchedGroups.reduce(0) { $0 + $1.sizeBytes } + uniqueToB.reduce(0) { $0 + $1.sizeBytes }
+    }
+}
+
 class FileScanner: ObservableObject {
     @Published var progress: Double = 0.0
     @Published var status: String = "Ready to start"
@@ -49,7 +62,10 @@ class FileScanner: ObservableObject {
     @Published var filterMediaOnly: Bool = false
     @Published var skipHiddenFiles: Bool = false
     @Published var detectSymlinks: Bool = false
-    
+    @Published var detectFolderDuplicates: Bool = false
+    @Published var folderMatchThreshold: Double = 0.75
+    @Published var folderDuplicateGroups: [FolderDuplicateGroup] = []
+
     @Published var sortCriteria: SortCriteria = .name
     @Published var sortOrder: SortOrderEnum = .ascending
     
@@ -68,6 +84,7 @@ class FileScanner: ObservableObject {
         progress = 0
         status = "Counting files..."
         duplicateGroups = []
+        folderDuplicateGroups = []
         deletedPaths = []
         totalPotentialSavings = 0
         totalRecovered = 0
@@ -106,6 +123,7 @@ class FileScanner: ObservableObject {
         self.processedItems = 0
         var tracker: [String: [DuplicateFileInfo]] = [:]
         var symlinkTracker: [String: [DuplicateFileInfo]] = [:]  // keyed by target device:inode
+        var allFilesPerFolder: [String: [DuplicateFileInfo]] = []  // folder path → all files
 
         while let fileURL = enumerator.nextObject() as? URL {
             if shouldStop { break }
@@ -140,6 +158,7 @@ class FileScanner: ObservableObject {
                     let key = "\(name)_\(sizeInBytes)"
                     let info = DuplicateFileInfo(path: path, name: name, size: sizeStr, sizeBytes: sizeInBytes)
                     if tracker[key] != nil { tracker[key]?.append(info) } else { tracker[key] = [info] }
+                    allFilesPerFolder[path, default: []].append(info)
                 }
 
                 processedItems += 1
@@ -166,17 +185,87 @@ class FileScanner: ObservableObject {
         }
         
         if !shouldStop {
+            self.detectFolderDuplicatesIfNeeded(allFiles: allFilesPerFolder, groups: &groups)
             DispatchQueue.main.async {
                 self.duplicateGroups = groups
                 self.totalPotentialSavings = groups.reduce(0) { $0 + Int64($1.sizeBytes) * Int64($1.files.count - 1) }
                 self.applySort()
-                self.status = "Completed! \(groups.count) groups found."
+                let total = groups.count + self.folderDuplicateGroups.count
+                self.status = "Completed! \(total) groups found."
                 self.isScanning = false
                 self.progress = 1.0
             }
         }
     }
     
+    private func detectFolderDuplicatesIfNeeded(allFiles: [String: [DuplicateFileInfo]], groups: inout [DuplicateGroup]) {
+        guard detectFolderDuplicates else { return }
+
+        // Count total files per folder
+        var folderFileCounts: [String: Int] = [:]
+        for (_, files) in allFiles {
+            for file in files {
+                folderFileCounts[file.path, default: 0] += 1
+            }
+        }
+
+        // For each duplicate group, record which folder pairs share it
+        // folderPairGroups: key = "folderA|folderB" (sorted), value = [DuplicateGroup]
+        var folderPairGroups: [String: [DuplicateGroup]] = [:]
+        var folderPairFolders: [String: (String, String)] = [:]
+
+        for group in groups {
+            let folders = Set(group.files.map { $0.path })
+            let folderArray = Array(folders).sorted()
+            for i in 0..<folderArray.count {
+                for j in (i+1)..<folderArray.count {
+                    let a = folderArray[i], b = folderArray[j]
+                    let key = "\(a)|\(b)"
+                    folderPairGroups[key, default: []].append(group)
+                    folderPairFolders[key] = (a, b)
+                }
+            }
+        }
+
+        var detectedFolderGroups: [FolderDuplicateGroup] = []
+        var consumedGroupIDs: Set<UUID> = []
+
+        for (key, sharedGroups) in folderPairGroups {
+            guard let (rawA, rawB) = folderPairFolders[key] else { continue }
+            let countA = folderFileCounts[rawA] ?? 0
+            let countB = folderFileCounts[rawB] ?? 0
+            let minCount = min(countA, countB)
+            guard minCount > 0 else { continue }
+
+            let ratio = Double(sharedGroups.count) / Double(minCount)
+            guard ratio >= folderMatchThreshold else { continue }
+
+            // folderA = the one with more files (the "keep" side)
+            let (folderA, folderB) = countA >= countB ? (rawA, rawB) : (rawB, rawA)
+
+            let sharedFileNamesAndSizes = Set(sharedGroups.map { "\($0.name)_\($0.sizeBytes)" })
+
+            let uniqueToA = (allFiles[folderA] ?? []).filter {
+                !sharedFileNamesAndSizes.contains("\($0.name)_\($0.sizeBytes)")
+            }
+            let uniqueToB = (allFiles[folderB] ?? []).filter {
+                !sharedFileNamesAndSizes.contains("\($0.name)_\($0.sizeBytes)")
+            }
+
+            detectedFolderGroups.append(FolderDuplicateGroup(
+                folderA: folderA, folderB: folderB,
+                matchedGroups: sharedGroups,
+                uniqueToA: uniqueToA, uniqueToB: uniqueToB,
+                matchRatio: ratio
+            ))
+            sharedGroups.forEach { consumedGroupIDs.insert($0.id) }
+        }
+
+        // Remove individual file groups that were fully consumed by a folder group
+        groups = groups.filter { !consumedGroupIDs.contains($0.id) }
+        folderDuplicateGroups = detectedFolderGroups
+    }
+
     func toggleSort(criteria: SortCriteria) {
         if sortCriteria == criteria { sortOrder = (sortOrder == .ascending) ? .descending : .ascending }
         else { sortCriteria = criteria; sortOrder = .descending }
@@ -417,6 +506,66 @@ class FileScanner: ObservableObject {
         }
     }
     
+    func mergeFolder(_ folderGroup: FolderDuplicateGroup) {
+        self.isScanning = true
+        self.status = "Merging folders..."
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let fileManager = FileManager.default
+            var errors: [String] = []
+
+            // Step 1: move unique files from B → A
+            for file in folderGroup.uniqueToB {
+                let srcURL = URL(fileURLWithPath: file.fullPath)
+                var destName = file.name
+                var destURL = URL(fileURLWithPath: folderGroup.folderA).appendingPathComponent(destName)
+
+                // Rename on collision
+                if fileManager.fileExists(atPath: destURL.path) {
+                    let ext = srcURL.pathExtension
+                    let base = ext.isEmpty ? destName : String(destName.dropLast(ext.count + 1))
+                    destName = ext.isEmpty ? "\(base)_merged" : "\(base)_merged.\(ext)"
+                    destURL = URL(fileURLWithPath: folderGroup.folderA).appendingPathComponent(destName)
+                }
+
+                do {
+                    try fileManager.moveItem(at: srcURL, to: destURL)
+                } catch {
+                    errors.append(file.name)
+                }
+            }
+
+            // Step 2: trash matched duplicate files in B
+            let filesToTrash = folderGroup.matchedGroups
+                .flatMap { $0.files }
+                .filter { $0.path == folderGroup.folderB }
+                .map { URL(fileURLWithPath: $0.fullPath) }
+
+            if !filesToTrash.isEmpty {
+                NSWorkspace.shared.recycle(filesToTrash, completionHandler: nil)
+            }
+
+            // Step 3: trash folder B itself
+            let folderBURL = URL(fileURLWithPath: folderGroup.folderB)
+            NSWorkspace.shared.recycle([folderBURL]) { _, _ in }
+
+            DispatchQueue.main.async {
+                self.folderDuplicateGroups.removeAll { $0.id == folderGroup.id }
+                // Mark all matched files in B as deleted in the deletedPaths set
+                for file in folderGroup.matchedGroups.flatMap({ $0.files }) where file.path == folderGroup.folderB {
+                    self.deletedPaths.insert(file.fullPath)
+                }
+                self.totalRecovered += Int64(folderGroup.totalSizeBytes)
+                self.isScanning = false
+                if errors.isEmpty {
+                    self.status = "Merge complete. \(folderGroup.folderB) moved to Trash."
+                } else {
+                    self.status = "Merge done with \(errors.count) error(s): \(errors.prefix(2).joined(separator: ", "))"
+                }
+            }
+        }
+    }
+
     func formatBytes(_ bytes: Int64) -> String {
         let kb = Double(bytes) / 1024.0
         let mb = kb / 1024.0
