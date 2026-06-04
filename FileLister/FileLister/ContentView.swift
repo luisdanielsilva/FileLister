@@ -140,6 +140,10 @@ struct ContentView: View {
                         Label("No Hidden", systemImage: "eye.slash").font(.system(size: 10))
                     }
                     .toggleStyle(.checkbox).disabled(scanner.isScanning)
+                    Toggle(isOn: $scanner.detectSymlinks) {
+                        Label("Symlinks", systemImage: "link").font(.system(size: 10))
+                    }
+                    .toggleStyle(.checkbox).disabled(scanner.isScanning)
                 }
                 Divider().frame(height: 20)
                 HStack(spacing: 8) {
@@ -207,8 +211,21 @@ struct ContentView: View {
                                 let remainingCount = group.files.filter { !scanner.deletedPaths.contains($0.fullPath) }.count
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack(spacing: 6) {
-                                        FileIconView(path: group.files.first?.fullPath ?? "", size: 14)
+                                        if group.isSymlinkGroup {
+                                            Image(systemName: "link")
+                                                .font(.system(size: 11, weight: .semibold))
+                                                .foregroundColor(.purple)
+                                                .frame(width: 14, height: 14)
+                                        } else {
+                                            FileIconView(path: group.files.first?.fullPath ?? "", size: 14)
+                                        }
                                         Text(group.name).fontWeight(.bold).font(.system(size: 12))
+                                        if group.isSymlinkGroup {
+                                            Text("symlink").font(.system(size: 8, weight: .medium))
+                                                .foregroundColor(.purple)
+                                                .padding(.horizontal, 4).padding(.vertical, 1)
+                                                .background(Color.purple.opacity(0.1)).cornerRadius(3)
+                                        }
                                         Text("(\(group.size))").font(.caption2).foregroundColor(.secondary)
                                         Spacer()
                                         Text("\(remainingCount) copies").font(.system(size: 9, weight: .bold))
@@ -353,7 +370,7 @@ struct ContentView: View {
         }
         .alert("Register the application to use this feature", isPresented: $showingRegisterAlert) {
             Button("Register here") {
-                if let url = URL(string: "https://www.google.com") {
+                if let url = URL(string: "https://www.luisdanielsilva.com") {
                     NSWorkspace.shared.open(url)
                 }
             }

@@ -18,7 +18,8 @@ struct DuplicateFileInfo: Identifiable, Hashable {
     let name: String
     let size: String
     let sizeBytes: Int
-    
+    var isSymlink: Bool = false
+
     var fullPath: String {
         return (path as NSString).appendingPathComponent(name)
     }
@@ -30,6 +31,7 @@ struct DuplicateGroup: Identifiable {
     let size: String
     let sizeBytes: Int
     let files: [DuplicateFileInfo]
+    var isSymlinkGroup: Bool = false
 }
 
 class FileScanner: ObservableObject {
@@ -46,6 +48,7 @@ class FileScanner: ObservableObject {
     @Published var useDeepAnalysis: Bool = false
     @Published var filterMediaOnly: Bool = false
     @Published var skipHiddenFiles: Bool = false
+    @Published var detectSymlinks: Bool = false
     
     @Published var sortCriteria: SortCriteria = .name
     @Published var sortOrder: SortOrderEnum = .ascending
@@ -93,44 +96,69 @@ class FileScanner: ObservableObject {
     private func performScan(sourceURL: URL) {
         let fileManager = FileManager.default
         let keys: [URLResourceKey] = [.fileSizeKey, .typeIdentifierKey, .isDirectoryKey]
-        
-        guard let enumerator = fileManager.enumerator(at: sourceURL, includingPropertiesForKeys: keys, options: [], errorHandler: { url, error in return true }) else {
+
+        guard let enumerator = fileManager.enumerator(at: sourceURL, includingPropertiesForKeys: keys,
+              options: [], errorHandler: { _, _ in return true }) else {
             DispatchQueue.main.async { self.isScanning = false }
             return
         }
-        
+
         self.processedItems = 0
         var tracker: [String: [DuplicateFileInfo]] = [:]
-        
+        var symlinkTracker: [String: [DuplicateFileInfo]] = [:]  // keyed by target device:inode
+
         while let fileURL = enumerator.nextObject() as? URL {
             if shouldStop { break }
             do {
                 let name = fileURL.lastPathComponent
                 if skipHiddenFiles && name.hasPrefix(".") { continue }
+
+                // Detect symlinks via destinationOfSymbolicLink — reliable, never follows the link
+                let symlinkDest = try? fileManager.destinationOfSymbolicLink(atPath: fileURL.path)
+                let isSymlink = symlinkDest != nil
+
                 let resourceValues = try fileURL.resourceValues(forKeys: Set(keys))
                 let isDir = resourceValues.isDirectory ?? false
                 let ext = fileURL.pathExtension.lowercased()
-                if filterMediaOnly && !isDir && !mediaExtensions.contains(ext) { continue }
-                
                 let path = fileURL.deletingLastPathComponent().path
-                let sizeInBytes = resourceValues.fileSize ?? 0
-                let sizeStr = formatSize(sizeInBytes)
-                
-                if !isDir {
+
+                if isSymlink && detectSymlinks {
+                    // Resolve to the canonical target path — handles relative symlinks and /tmp→/private/tmp
+                    let targetURL = fileURL.resolvingSymlinksInPath()
+                    let symlinkKey = targetURL.path
+                    let targetAttrs = try? fileManager.attributesOfItem(atPath: targetURL.path)
+                    let targetSize = targetAttrs?[.size] as? Int ?? 0
+                    let info = DuplicateFileInfo(path: path, name: name,
+                                                 size: formatSize(targetSize), sizeBytes: targetSize,
+                                                 isSymlink: true)
+                    if symlinkTracker[symlinkKey] != nil { symlinkTracker[symlinkKey]?.append(info) }
+                    else { symlinkTracker[symlinkKey] = [info] }
+                } else if !isDir && !isSymlink {
+                    if filterMediaOnly && !mediaExtensions.contains(ext) { continue }
+                    let sizeInBytes = resourceValues.fileSize ?? 0
+                    let sizeStr = formatSize(sizeInBytes)
                     let key = "\(name)_\(sizeInBytes)"
                     let info = DuplicateFileInfo(path: path, name: name, size: sizeStr, sizeBytes: sizeInBytes)
                     if tracker[key] != nil { tracker[key]?.append(info) } else { tracker[key] = [info] }
                 }
-                
+
                 processedItems += 1
                 let currentProgress = Double(processedItems) / Double(max(1, totalItems))
                 DispatchQueue.main.async { self.progress = currentProgress; self.status = "Scanning: \(name)" }
             } catch { continue }
         }
-        
+
         var groups = tracker.values
             .filter { $0.count > 1 }
             .map { DuplicateGroup(name: $0[0].name, size: $0[0].size, sizeBytes: $0[0].sizeBytes, files: $0) }
+
+        // Append symlink duplicate groups
+        let symlinkGroups = symlinkTracker.filter { $0.value.count > 1 }.map { (targetPath, files) -> DuplicateGroup in
+            let targetName = URL(fileURLWithPath: targetPath).lastPathComponent
+            return DuplicateGroup(name: targetName, size: files[0].size, sizeBytes: files[0].sizeBytes,
+                                  files: files, isSymlinkGroup: true)
+        }
+        groups.append(contentsOf: symlinkGroups)
         
         if useDeepAnalysis && !shouldStop && !groups.isEmpty {
             DispatchQueue.main.async { self.status = "Deep Analysis (SHA-256)..." }
@@ -157,6 +185,9 @@ class FileScanner: ObservableObject {
     
     func applySort() {
         duplicateGroups.sort { (a, b) -> Bool in
+            if detectSymlinks {
+                if a.isSymlinkGroup != b.isSymlinkGroup { return a.isSymlinkGroup }
+            }
             let result: Bool
             switch sortCriteria {
             case .name: result = a.name < b.name
@@ -271,32 +302,51 @@ class FileScanner: ObservableObject {
 
     func recycleFile(atPath fullPath: String) {
         let fileURL = URL(fileURLWithPath: fullPath)
-        
-        // SECURITY: Identify the original/reference file
+
         guard let group = self.duplicateGroups.first(where: { g in g.files.contains(where: { $0.fullPath == fullPath }) }) else { return }
-        
-        // Find the first active file that is NOT the one being deleted
+        guard let fileInfo = group.files.first(where: { $0.fullPath == fullPath }) else { return }
+        guard group.files.filter({ !deletedPaths.contains($0.fullPath) }).count > 1 else {
+            self.status = "Security Error: No active original file found!"
+            return
+        }
+
+        // Symlinks: identical by definition (same target) — skip binary check
+        if fileInfo.isSymlink || group.isSymlinkGroup {
+            NSWorkspace.shared.recycle([fileURL]) { (_, error) in
+                DispatchQueue.main.async {
+                    if let error = error { self.status = "Error: \(error.localizedDescription)" }
+                    else {
+                        self.deletedPaths.insert(fullPath)
+                        self.totalRecovered += Int64(group.sizeBytes)
+                        self.status = "Symlink moved to Trash."
+                    }
+                }
+            }
+            return
+        }
+
+        // Regular files: verify binary identity before recycling
         guard let referenceFile = group.files.first(where: { $0.fullPath != fullPath && !deletedPaths.contains($0.fullPath) }) else {
             self.status = "Security Error: No active original file found!"
             return
         }
-        
+
         let referenceURL = URL(fileURLWithPath: referenceFile.fullPath)
         self.status = "Verifying binary identity..."
-        
+
         DispatchQueue.global(qos: .userInitiated).async {
             let identical = self.isContentIdentical(url1: fileURL, url2: referenceURL)
-            
+
             DispatchQueue.main.async {
                 if !identical {
                     self.status = "Security Alert: Files differ! Deletion aborted."
                     return
                 }
-                
-                NSWorkspace.shared.recycle([fileURL]) { (newURLs, error) in
+
+                NSWorkspace.shared.recycle([fileURL]) { (_, error) in
                     DispatchQueue.main.async {
                         if let error = error { self.status = "Error: \(error.localizedDescription)" }
-                        else { 
+                        else {
                             self.deletedPaths.insert(fullPath)
                             self.totalRecovered += Int64(group.sizeBytes)
                             self.status = "Security Verified! Moved to Trash."
@@ -318,20 +368,24 @@ class FileScanner: ObservableObject {
             
             for group in self.duplicateGroups {
                 let activeFiles = group.files.filter { !self.deletedPaths.contains($0.fullPath) }
-                
+
                 if activeFiles.count > 1 {
-                    let referenceFile = activeFiles[0] // First file is the Original
-                    let referenceURL = URL(fileURLWithPath: referenceFile.fullPath)
-                    
-                    for i in 1..<activeFiles.count {
-                        let file = activeFiles[i]
-                        let fileURL = URL(fileURLWithPath: file.fullPath)
-                        
-                        if self.isContentIdentical(url1: fileURL, url2: referenceURL) {
-                            toRecycle.append(fileURL)
+                    if group.isSymlinkGroup {
+                        // Symlinks: identical by target — skip binary check, keep the first
+                        for i in 1..<activeFiles.count {
+                            toRecycle.append(URL(fileURLWithPath: activeFiles[i].fullPath))
                             totalSavingsInSession += Int64(group.sizeBytes)
-                        } else {
-                            skippedCount += 1
+                        }
+                    } else {
+                        let referenceURL = URL(fileURLWithPath: activeFiles[0].fullPath)
+                        for i in 1..<activeFiles.count {
+                            let fileURL = URL(fileURLWithPath: activeFiles[i].fullPath)
+                            if self.isContentIdentical(url1: fileURL, url2: referenceURL) {
+                                toRecycle.append(fileURL)
+                                totalSavingsInSession += Int64(group.sizeBytes)
+                            } else {
+                                skippedCount += 1
+                            }
                         }
                     }
                 }
