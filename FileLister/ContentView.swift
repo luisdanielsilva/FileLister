@@ -8,7 +8,38 @@ import QuickLookUI
 class QuickLookManager: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
     static let shared = QuickLookManager()
     var currentURL: URL?
-    
+    private var eventMonitor: Any?
+
+    override init() {
+        super.init()
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 49,  // Space
+                  let panel = QLPreviewPanel.shared(),
+                  QLPreviewPanel.sharedPreviewPanelExists(),
+                  panel.isVisible else { return event }
+            panel.close()
+            self?.currentURL = nil
+            return nil  // consume the event
+        }
+    }
+
+    deinit {
+        if let monitor = eventMonitor { NSEvent.removeMonitor(monitor) }
+    }
+
+    func togglePreview(url: URL) {
+        guard let panel = QLPreviewPanel.shared() else { return }
+        if QLPreviewPanel.sharedPreviewPanelExists() && panel.isVisible {
+            panel.close()
+        } else {
+            self.currentURL = url
+            panel.updateController()
+            panel.delegate = self
+            panel.dataSource = self
+            panel.makeKeyAndOrderFront(nil)
+        }
+    }
+
     func showPreview(url: URL) {
         self.currentURL = url
         guard let panel = QLPreviewPanel.shared() else { return }
@@ -25,10 +56,12 @@ class QuickLookManager: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelega
     func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
         return currentURL != nil ? 1 : 0
     }
-    
+
     func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
         return currentURL as QLPreviewItem?
     }
+
+
 }
 
 struct FileIconView: View {
@@ -280,6 +313,14 @@ struct ContentView: View {
                                         Text(scanner.formatBytes(Int64(folderGroup.totalSizeBytes)))
                                             .font(.system(size: 9, weight: .medium)).foregroundColor(.secondary)
                                         Spacer()
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "internaldrive").font(.system(size: 8))
+                                            Text("Saves \(scanner.formatBytes(Int64(folderGroup.potentialSavings)))")
+                                                .font(.system(size: 9, weight: .medium))
+                                        }
+                                        .foregroundColor(.green)
+                                        .padding(.horizontal, 7).padding(.vertical, 3)
+                                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.green.opacity(0.4), lineWidth: 1))
                                         Button(action: { folderGroupToMerge = folderGroup }) {
                                             HStack(spacing: 4) {
                                                 Image(systemName: "arrow.triangle.merge")
@@ -403,15 +444,23 @@ struct ContentView: View {
             // Hidden Button for Keyboard Shortcut (Space)
             Button("") {
                 if let file = selectedFile {
-                    QuickLookManager.shared.showPreview(url: URL(fileURLWithPath: file.fullPath))
+                    QuickLookManager.shared.togglePreview(url: URL(fileURLWithPath: file.fullPath))
                 } else if let id = selectedFolderGroupID,
                           let fg = scanner.folderDuplicateGroups.first(where: { $0.id == id }) {
-                    previewFolderGroup = fg
+                    previewFolderGroup = previewFolderGroup == nil ? fg : nil
                 }
             }
             .keyboardShortcut(.space, modifiers: [])
             .opacity(0)
             .frame(width: 0, height: 0)
+
+            Button("") { navigateFolderGroup(by: -1) }
+                .keyboardShortcut(.upArrow, modifiers: [])
+                .opacity(0).frame(width: 0, height: 0)
+
+            Button("") { navigateFolderGroup(by: 1) }
+                .keyboardShortcut(.downArrow, modifiers: [])
+                .opacity(0).frame(width: 0, height: 0)
 
             // Status Bar
             HStack {
@@ -540,6 +589,17 @@ struct ContentView: View {
         .buttonStyle(.plain)
     }
     
+    private func navigateFolderGroup(by delta: Int) {
+        let groups = scanner.folderDuplicateGroups
+        guard !groups.isEmpty else { return }
+        let currentIndex = groups.firstIndex(where: { $0.id == selectedFolderGroupID }) ?? -1
+        let nextIndex = min(max(currentIndex + delta, 0), groups.count - 1)
+        let nextGroup = groups[nextIndex]
+        selectedFolderGroupID = nextGroup.id
+        // If the preview is open, update it to the new selection
+        if previewFolderGroup != nil { previewFolderGroup = nextGroup }
+    }
+
     private func selectSource() {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.allowsMultipleSelection = false
         if panel.runModal() == .OK {
@@ -571,6 +631,7 @@ struct FolderDiffPreviewSheet: View {
     @ObservedObject var scanner: FileScanner
     let onMerge: () -> Void
     let onClose: () -> Void
+    @State private var focusedRowIndex: Int = -1
 
     private var nameA: String { URL(fileURLWithPath: folderGroup.folderA).lastPathComponent }
     private var nameB: String { URL(fileURLWithPath: folderGroup.folderB).lastPathComponent }
@@ -611,14 +672,14 @@ struct FolderDiffPreviewSheet: View {
 
             // Header
             HStack(spacing: 0) {
-                HStack(spacing: 6) {
-                    Image(systemName: "folder.fill").foregroundColor(.green)
-                    VStack(alignment: .leading, spacing: 1) {
+                VStack(spacing: 2) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "folder.fill").foregroundColor(.green)
                         Text(nameA).fontWeight(.bold).font(.system(size: 13))
-                        Text("KEEP").font(.system(size: 9, weight: .bold)).foregroundColor(.green)
                     }
+                    Text("KEEP").font(.system(size: 9, weight: .bold)).foregroundColor(.green)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
                 .padding(12)
                 .background(Color.green.opacity(0.08))
 
@@ -627,16 +688,15 @@ struct FolderDiffPreviewSheet: View {
                     .foregroundColor(.secondary)
                     .frame(width: 110)
                     .padding(12)
-                    .background(Color.gray.opacity(0.06))
 
-                HStack(spacing: 6) {
-                    Image(systemName: "folder.fill").foregroundColor(.red)
-                    VStack(alignment: .leading, spacing: 1) {
+                VStack(spacing: 2) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "folder.fill").foregroundColor(.red)
                         Text(nameB).fontWeight(.bold).font(.system(size: 13))
-                        Text("MERGE & CLEAN").font(.system(size: 9, weight: .bold)).foregroundColor(.red)
                     }
+                    Text("MERGE & CLEAN").font(.system(size: 9, weight: .bold)).foregroundColor(.red)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
                 .padding(12)
                 .background(Color.red.opacity(0.06))
             }
@@ -656,13 +716,37 @@ struct FolderDiffPreviewSheet: View {
             Divider()
 
             // Diff rows
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(diffRows) { row in
-                        diffRowView(row)
-                        Divider().opacity(0.4)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(diffRows.enumerated()), id: \.element.id) { index, row in
+                            diffRowView(row)
+                                .background(index == focusedRowIndex ? Color.accentColor.opacity(0.12) : Color.clear)
+                                .id(index)
+                            Divider().opacity(0.4)
+                        }
                     }
                 }
+                .onChange(of: focusedRowIndex) { newIndex in
+                    withAnimation { proxy.scrollTo(newIndex, anchor: .center) }
+                }
+                .background(
+                    Group {
+                        Button("") {
+                            focusedRowIndex = max(0, focusedRowIndex < 0 ? 0 : focusedRowIndex - 1)
+                        }
+                        .keyboardShortcut(.upArrow, modifiers: [])
+                        .buttonStyle(.plain)
+                        .opacity(0).frame(width: 0, height: 0)
+
+                        Button("") {
+                            focusedRowIndex = min(diffRows.count - 1, focusedRowIndex < 0 ? 0 : focusedRowIndex + 1)
+                        }
+                        .keyboardShortcut(.downArrow, modifiers: [])
+                        .buttonStyle(.plain)
+                        .opacity(0).frame(width: 0, height: 0)
+                    }
+                )
             }
 
             Divider()
@@ -686,7 +770,23 @@ struct FolderDiffPreviewSheet: View {
             }
             .padding(12)
         }
+        .background(
+            HStack(spacing: 0) {
+                Color.clear.frame(maxWidth: .infinity)
+                Color(NSColor.windowBackgroundColor).frame(width: 110)
+                Color.clear.frame(maxWidth: .infinity)
+            }
+            .ignoresSafeArea()
+        )
         .frame(width: 820, height: 560)
+        // Space bar closes the sheet, mirroring the Close button
+        .background(
+            Button("") { onClose() }
+                .keyboardShortcut(.space, modifiers: [])
+                .buttonStyle(.plain)
+                .opacity(0)
+                .frame(width: 0, height: 0)
+        )
     }
 
     @ViewBuilder
@@ -740,7 +840,6 @@ struct FolderDiffPreviewSheet: View {
             Text(label).font(.system(size: 7, weight: .bold)).foregroundColor(color)
         }
         .frame(minWidth: 110, maxWidth: 110, minHeight: 0, maxHeight: .infinity)
-        .background(Color.gray.opacity(0.08))
     }
 
     private func emptyCell() -> some View {

@@ -85,6 +85,11 @@ struct FolderDuplicateGroup: Identifiable {
         matchedGroups.reduce(0) { $0 + $1.sizeBytes } + uniqueToB.reduce(0) { $0 + $1.sizeBytes }
     }
 
+    // Files deleted from B — the actual disk space recovered
+    var potentialSavings: Int {
+        matchedGroups.reduce(0) { $0 + $1.sizeBytes }
+    }
+
     var tooltipText: String {
         let filesInA = matchedGroups.count + uniqueToA.count
         let filesInB = matchedGroups.count + uniqueToB.count
