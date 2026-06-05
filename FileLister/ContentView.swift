@@ -106,9 +106,24 @@ struct SelectionButton: View {
     }
 }
 
+enum AppMode: String, CaseIterable, Identifiable {
+    case files   = "Files"
+    case folders = "Folders"
+    case photos  = "Photos"
+    var id: String { rawValue }
+    var icon: String {
+        switch self {
+        case .files:   return "doc.on.doc"
+        case .folders: return "folder.badge.questionmark"
+        case .photos:  return "photo.on.rectangle.angled"
+        }
+    }
+}
+
 struct ContentView: View {
     @StateObject private var scanner = FileScanner()
     @EnvironmentObject var licenseManager: LicenseManager
+    @State private var mode: AppMode = .files
     @State private var sourceFolders: [URL] = []
     @State private var collapsedRoots: Set<String> = []
     private let acrossKey = "__across_multiple__"
@@ -139,6 +154,25 @@ struct ContentView: View {
     
     var body: some View {
         VStack(spacing: 0) {
+            // Mode switcher
+            Picker("", selection: $mode) {
+                ForEach(AppMode.allCases) { m in
+                    Label(m.rawValue, systemImage: m.icon).tag(m)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelStyle(.titleAndIcon)
+            .padding(.horizontal).padding(.top, 10)
+            .disabled(scanner.isScanning)
+            .onChange(of: mode) { newMode in
+                scanner.detectFolderDuplicates = (newMode == .folders)
+                // Each mode shows its own scan — clear stale results when switching
+                scanner.duplicateGroups = []
+                scanner.folderDuplicateGroups = []
+                selectedFolderGroupID = nil
+                selectedFile = nil
+            }
+
             // Top Bar
             HStack(spacing: 12) {
                 Button(action: { startScanning() }) {
@@ -148,11 +182,11 @@ struct ContentView: View {
                     }
                     .fontWeight(.semibold)
                     .frame(width: 180, height: 32)
-                    .background((sourceFolders.isEmpty && !scanner.isScanning) ? Color.gray.opacity(0.3) : Color.blue)
+                    .background((sourceFolders.isEmpty && !scanner.isScanning) || mode == .photos ? Color.gray.opacity(0.3) : Color.blue)
                     .foregroundColor(.white)
                     .cornerRadius(6)
                 }
-                .disabled(sourceFolders.isEmpty && !scanner.isScanning)
+                .disabled((sourceFolders.isEmpty && !scanner.isScanning) || mode == .photos)
                 .buttonStyle(.plain)
 
                 // Selected folders list + add button
@@ -210,27 +244,32 @@ struct ContentView: View {
             // Analysis Options + Sorting
             HStack(spacing: 20) {
                 HStack(spacing: 15) {
-                    Toggle(isOn: $scanner.useDeepAnalysis) {
-                        Label("Deep Scan", systemImage: "checkmark.shield").font(.system(size: 10))
-                    }
-                    .toggleStyle(.checkbox).disabled(scanner.isScanning)
-                    Toggle(isOn: $scanner.filterMediaOnly) {
-                        Label("Media", systemImage: "photo.on.rectangle").font(.system(size: 10))
-                    }
-                    .toggleStyle(.checkbox).disabled(scanner.isScanning)
-                    Toggle(isOn: $scanner.skipHiddenFiles) {
-                        Label("No Hidden", systemImage: "eye.slash").font(.system(size: 10))
-                    }
-                    .toggleStyle(.checkbox).disabled(scanner.isScanning)
-                    Toggle(isOn: $scanner.detectSymlinks) {
-                        Label("Symlinks", systemImage: "link").font(.system(size: 10))
-                    }
-                    .toggleStyle(.checkbox).disabled(scanner.isScanning)
-                    Toggle(isOn: $scanner.detectFolderDuplicates) {
-                        Label("Folders", systemImage: "folder.badge.questionmark").font(.system(size: 10))
-                    }
-                    .toggleStyle(.checkbox).disabled(scanner.isScanning)
-                    if scanner.detectFolderDuplicates {
+                    if mode == .files {
+                        Toggle(isOn: $scanner.useDeepAnalysis) {
+                            Label("Deep Scan", systemImage: "checkmark.shield").font(.system(size: 10))
+                        }
+                        .toggleStyle(.checkbox).disabled(scanner.isScanning)
+                        Toggle(isOn: $scanner.filterMediaOnly) {
+                            Label("Media", systemImage: "photo.on.rectangle").font(.system(size: 10))
+                        }
+                        .toggleStyle(.checkbox).disabled(scanner.isScanning)
+                        Toggle(isOn: $scanner.skipHiddenFiles) {
+                            Label("No Hidden", systemImage: "eye.slash").font(.system(size: 10))
+                        }
+                        .toggleStyle(.checkbox).disabled(scanner.isScanning)
+                        Toggle(isOn: $scanner.detectSymlinks) {
+                            Label("Symlinks", systemImage: "link").font(.system(size: 10))
+                        }
+                        .toggleStyle(.checkbox).disabled(scanner.isScanning)
+                    } else if mode == .folders {
+                        Toggle(isOn: $scanner.filterMediaOnly) {
+                            Label("Media", systemImage: "photo.on.rectangle").font(.system(size: 10))
+                        }
+                        .toggleStyle(.checkbox).disabled(scanner.isScanning)
+                        Toggle(isOn: $scanner.skipHiddenFiles) {
+                            Label("No Hidden", systemImage: "eye.slash").font(.system(size: 10))
+                        }
+                        .toggleStyle(.checkbox).disabled(scanner.isScanning)
                         HStack(spacing: 4) {
                             Text("Match:").font(.system(size: 10)).foregroundColor(.secondary)
                             Slider(value: $scanner.folderMatchThreshold, in: 0.5...1.0, step: 0.05)
@@ -369,7 +408,22 @@ struct ContentView: View {
             }
 
             // Duplicates List
-            if !scanner.duplicateGroups.isEmpty || !scanner.folderDuplicateGroups.isEmpty {
+            if mode == .photos {
+                Spacer()
+                VStack(spacing: 12) {
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 48)).foregroundColor(.gray.opacity(0.25))
+                    Text("Duplicate Photos").font(.title3).fontWeight(.semibold)
+                    Text("Find visually similar photos (crops, re-exports, different sizes)\nand keep the best copy by resolution, size, or date.")
+                        .font(.caption).foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                    Text("Coming soon")
+                        .font(.system(size: 10, weight: .bold)).foregroundColor(.indigo)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Color.indigo.opacity(0.1)).cornerRadius(5)
+                }
+                Spacer()
+            } else if !scanner.duplicateGroups.isEmpty || !scanner.folderDuplicateGroups.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
                         Text("Duplicate Groups found (\(scanner.duplicateGroups.count + scanner.folderDuplicateGroups.count)):").font(.caption).fontWeight(.bold)
