@@ -109,7 +109,9 @@ struct SelectionButton: View {
 struct ContentView: View {
     @StateObject private var scanner = FileScanner()
     @EnvironmentObject var licenseManager: LicenseManager
-    @State private var sourceURL: URL?
+    @State private var sourceFolders: [URL] = []
+    @State private var collapsedRoots: Set<String> = []
+    private let acrossKey = "__across_multiple__"
     
     // Selection state for Quick Look
     @State private var selectedFile: DuplicateFileInfo? = nil
@@ -119,7 +121,14 @@ struct ContentView: View {
     @State private var showingMergeAllSheet = false
     @State private var selectedFolderGroupID: UUID? = nil
     @State private var previewFolderGroup: FolderDuplicateGroup? = nil
-    
+    // Destination folder chosen when "Copy to new folder" is enabled
+    @State private var safeMergeDestination: URL? = nil
+    // One-by-one merge walkthrough — driven through the existing preview sheet
+    @State private var walkthroughActive = false
+    @State private var walkthroughQueue: [FolderDuplicateGroup] = []
+    @State private var walkthroughIndex = 0
+    @State private var approvedFolderIDs: Set<UUID> = []
+
     var hasRemovableDuplicates: Bool {
         for group in scanner.duplicateGroups {
             let activeCount = group.files.filter { !scanner.deletedPaths.contains($0.fullPath) }.count
@@ -139,26 +148,62 @@ struct ContentView: View {
                     }
                     .fontWeight(.semibold)
                     .frame(width: 180, height: 32)
-                    .background(sourceURL == nil || scanner.isScanning ? Color.gray.opacity(0.3) : Color.blue)
+                    .background((sourceFolders.isEmpty && !scanner.isScanning) ? Color.gray.opacity(0.3) : Color.blue)
                     .foregroundColor(.white)
                     .cornerRadius(6)
                 }
-                .disabled(sourceURL == nil || scanner.isScanning)
+                .disabled(sourceFolders.isEmpty && !scanner.isScanning)
                 .buttonStyle(.plain)
 
-                HStack {
-                    Text(sourceURL?.path ?? "No Folder Selected")
-                        .foregroundColor(.secondary)
-                        .font(.system(size: 11, design: .monospaced))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer()
-                    Button("Select...") { selectSource() }
-                    .buttonStyle(.bordered).controlSize(.small)
+                // Selected folders list + add button
+                HStack(spacing: 8) {
+                    if sourceFolders.isEmpty {
+                        Text("No Folders Selected")
+                            .foregroundColor(.secondary)
+                            .font(.system(size: 11, design: .monospaced))
+                    } else {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(sourceFolders, id: \.self) { folder in
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "folder.fill").font(.system(size: 9)).foregroundColor(.blue.opacity(0.7))
+                                        Text(folder.lastPathComponent)
+                                            .font(.system(size: 10))
+                                            .lineLimit(1)
+                                            .help(folder.path)
+                                        Button(action: { sourceFolders.removeAll { $0 == folder } }) {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .font(.system(size: 9)).foregroundColor(.secondary)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .disabled(scanner.isScanning)
+                                    }
+                                    .padding(.horizontal, 6).padding(.vertical, 3)
+                                    .background(Color.blue.opacity(0.08)).cornerRadius(4)
+                                }
+                            }
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    Button("Add Folder...") { selectSource() }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .disabled(scanner.isScanning)
                 }
                 .padding(.horizontal, 10).frame(height: 32)
                 .background(Color(NSColor.controlBackgroundColor))
                 .cornerRadius(6).overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.2), lineWidth: 1))
+
+                // Scan scope — only relevant with 2+ folders
+                if sourceFolders.count >= 2 {
+                    Picker("", selection: $scanner.scanScope) {
+                        Text("Across all").tag(ScanScope.combined)
+                        Text("Within each").tag(ScanScope.perFolder)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 180)
+                    .disabled(scanner.isScanning)
+                    .help("Across all: find duplicates pooled across every folder.\nWithin each: find duplicates only inside each folder separately.")
+                }
             }
             .padding().background(Color(NSColor.windowBackgroundColor))
             
@@ -205,10 +250,43 @@ struct ContentView: View {
                 Spacer()
                 
                 if !scanner.folderDuplicateGroups.isEmpty && !scanner.isScanning {
-                    Button(action: { showingMergeAllSheet = true }) {
+                    Toggle(isOn: $scanner.safeMergeToNewFolder) {
+                        Label("Copy to new folder", systemImage: "doc.on.doc").font(.system(size: 10))
+                    }
+                    .toggleStyle(.checkbox)
+                    .help("Keep originals untouched — write the merged result into a destination folder you choose")
+                    .onChange(of: scanner.safeMergeToNewFolder) { on in
+                        if on {
+                            // Defer so the toggle's state update finishes before the modal panel opens
+                            DispatchQueue.main.async { chooseSafeMergeDestination() }
+                        } else {
+                            safeMergeDestination = nil
+                        }
+                    }
+                    if scanner.safeMergeToNewFolder, let dest = safeMergeDestination {
+                        Button(action: { chooseSafeMergeDestination() }) {
+                            HStack(spacing: 3) {
+                                Image(systemName: "arrow.right").font(.system(size: 8))
+                                Text(dest.lastPathComponent).font(.system(size: 10, weight: .medium))
+                            }
+                            .foregroundColor(.green)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Merged copies are written into \(dest.path). Click to change.")
+                    }
+
+                    if !scanner.safeMergeToNewFolder {
+                        Toggle(isOn: $scanner.renameKeptFolder) {
+                            Label("Rename kept folder", systemImage: "pencil").font(.system(size: 10))
+                        }
+                        .toggleStyle(.checkbox)
+                        .help("When on, the kept folder is renamed with the merged tag (e.g. \"…_merged\"). When off, it keeps its original name and just gains the merged files.")
+                    }
+
+                    Button(action: { startWalkthrough() }) {
                         HStack(spacing: 4) {
-                            Image(systemName: "arrow.triangle.merge")
-                            Text("Merge All Folders")
+                            Image(systemName: "rectangle.stack.badge.play")
+                            Text("Review One-by-One")
                         }
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.indigo)
@@ -217,6 +295,38 @@ struct ContentView: View {
                         .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.indigo.opacity(0.3), lineWidth: 1))
                     }
                     .buttonStyle(.plain)
+                    .help("Step through each folder pair and approve or skip individually")
+
+                    Button(action: {
+                        if scanner.safeMergeToNewFolder { safeMergeBatch(scanner.folderDuplicateGroups) }
+                        else { showingMergeAllSheet = true }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: scanner.safeMergeToNewFolder ? "doc.on.doc" : "arrow.triangle.merge")
+                            Text(scanner.safeMergeToNewFolder ? "Merge All to New" : "Merge All Folders")
+                        }
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.indigo)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Color.indigo.opacity(0.1)).cornerRadius(5)
+                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.indigo.opacity(0.3), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
+                    Picker("", selection: $scanner.logLocationMode) {
+                        Text("Log: App folder").tag(LogLocationMode.appFolder)
+                        Text("Log: Ask each time").tag(LogLocationMode.askEachTime)
+                    }
+                    .pickerStyle(.menu).frame(width: 150)
+                    .help("Where the merge log (JSON + HTML) is saved after each merge.")
+
+                    if let logURL = scanner.lastLogURL {
+                        Button(action: { NSWorkspace.shared.activateFileViewerSelecting([logURL]) }) {
+                            Label("Reveal Log", systemImage: "doc.text.magnifyingglass").font(.system(size: 10))
+                        }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .help("Show the most recent merge log in Finder")
+                    }
                 }
                 if hasRemovableDuplicates && !scanner.isScanning {
                     Button(action: {
@@ -273,153 +383,20 @@ struct ContentView: View {
                     
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 8) {
-                            ForEach(scanner.detectFolderDuplicates ? scanner.folderDuplicateGroups : []) { folderGroup in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "folder.badge.questionmark")
-                                            .font(.system(size: 11, weight: .semibold))
-                                            .foregroundColor(.indigo)
-                                        VStack(alignment: .leading, spacing: 1) {
-                                            Text(URL(fileURLWithPath: folderGroup.folderA).lastPathComponent)
-                                                .fontWeight(.bold).font(.system(size: 12))
-                                            Text(folderGroup.folderA)
-                                                .font(.system(size: 9, design: .monospaced)).foregroundColor(.secondary)
-                                                .lineLimit(1).truncationMode(.middle)
-                                        }
-                                        Image(systemName: "arrow.left.arrow.right")
-                                            .font(.system(size: 9)).foregroundColor(.secondary)
-                                        VStack(alignment: .leading, spacing: 1) {
-                                            Text(URL(fileURLWithPath: folderGroup.folderB).lastPathComponent)
-                                                .fontWeight(.bold).font(.system(size: 12))
-                                            Text(folderGroup.folderB)
-                                                .font(.system(size: 9, design: .monospaced)).foregroundColor(.secondary)
-                                                .lineLimit(1).truncationMode(.middle)
-                                        }
-                                        Spacer()
-                                        Text("\(Int(folderGroup.matchRatio * 100))% match")
-                                            .font(.system(size: 9, weight: .bold))
-                                            .foregroundColor(.indigo)
-                                            .padding(.horizontal, 5).padding(.vertical, 1)
-                                            .background(Color.indigo.opacity(0.1)).cornerRadius(3)
-                                            .help(folderGroup.tooltipText)
-                                    }
-                                    HStack(spacing: 12) {
-                                        Text("\(folderGroup.matchedGroups.count) shared files")
-                                            .font(.system(size: 9)).foregroundColor(.secondary)
-                                        if !folderGroup.uniqueToB.isEmpty {
-                                            Text("\(folderGroup.uniqueToB.count) unique to merge")
-                                                .font(.system(size: 9)).foregroundColor(.secondary)
-                                        }
-                                        Text(scanner.formatBytes(Int64(folderGroup.totalSizeBytes)))
-                                            .font(.system(size: 9, weight: .medium)).foregroundColor(.secondary)
-                                        Spacer()
-                                        HStack(spacing: 4) {
-                                            Image(systemName: "internaldrive").font(.system(size: 8))
-                                            Text("Saves \(scanner.formatBytes(Int64(folderGroup.potentialSavings)))")
-                                                .font(.system(size: 9, weight: .medium))
-                                        }
-                                        .foregroundColor(.green)
-                                        .padding(.horizontal, 7).padding(.vertical, 3)
-                                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.green.opacity(0.4), lineWidth: 1))
-                                        Button(action: { folderGroupToMerge = folderGroup }) {
-                                            HStack(spacing: 4) {
-                                                Image(systemName: "arrow.triangle.merge")
-                                                Text("Merge & Clean")
-                                            }
-                                            .font(.system(size: 10, weight: .bold))
-                                            .foregroundColor(.indigo)
-                                            .padding(.horizontal, 10).padding(.vertical, 4)
-                                            .background(Color.indigo.opacity(0.1)).cornerRadius(5)
-                                            .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.indigo.opacity(0.3), lineWidth: 1))
-                                        }
-                                        .buttonStyle(.plain)
-                                        .disabled(scanner.isScanning)
-                                    }
-                                    .padding(.leading, 4)
-                                }
-                                .padding(6)
-                                .background(selectedFolderGroupID == folderGroup.id ? Color.indigo.opacity(0.18) : Color.indigo.opacity(0.06))
-                                .cornerRadius(4)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .stroke(selectedFolderGroupID == folderGroup.id ? Color.indigo.opacity(0.6) : Color.clear, lineWidth: 1.5)
-                                )
-                                .onTapGesture { selectedFolderGroupID = folderGroup.id; selectedFile = nil }
-                            }
-
-                            ForEach(scanner.detectFolderDuplicates ? [] : scanner.duplicateGroups) { group in
-                                let remainingCount = group.files.filter { !scanner.deletedPaths.contains($0.fullPath) }.count
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack(spacing: 6) {
-                                        if group.isSymlinkGroup {
-                                            Image(systemName: "link")
-                                                .font(.system(size: 11, weight: .semibold))
-                                                .foregroundColor(.purple)
-                                                .frame(width: 14, height: 14)
+                            if !resultSections.isEmpty {
+                                ForEach(resultSections, id: \.self) { key in
+                                    collapsibleSectionHeader(key)
+                                    if !collapsedRoots.contains(key) {
+                                        if scanner.detectFolderDuplicates {
+                                            ForEach(scanner.folderDuplicateGroups.filter { sectionKey(forFolderGroup: $0) == key }) { folderGroupRow($0) }
                                         } else {
-                                            FileIconView(path: group.files.first?.fullPath ?? "", size: 14)
+                                            ForEach(scanner.duplicateGroups.filter { sectionKey(forFileGroup: $0) == key }) { fileGroupRow($0) }
                                         }
-                                        Text(group.name).fontWeight(.bold).font(.system(size: 12))
-                                        if group.isSymlinkGroup {
-                                            Text("symlink").font(.system(size: 8, weight: .medium))
-                                                .foregroundColor(.purple)
-                                                .padding(.horizontal, 4).padding(.vertical, 1)
-                                                .background(Color.purple.opacity(0.1)).cornerRadius(3)
-                                        }
-                                        Text("(\(group.size))").font(.caption2).foregroundColor(.secondary)
-                                        Spacer()
-                                        if let c = group.confidence {
-                                            let pct = Int(c.overall * 100)
-                                            let color: Color = c.overall >= 0.75 ? .orange : (c.overall >= 0.5 ? .yellow : .gray)
-                                            Text("\(pct)% match")
-                                                .font(.system(size: 8, weight: .bold))
-                                                .foregroundColor(color)
-                                                .padding(.horizontal, 4).padding(.vertical, 1)
-                                                .background(color.opacity(0.12)).cornerRadius(3)
-                                                .help(c.tooltipText)
-                                        }
-                                        Text("\(remainingCount) copies").font(.system(size: 9, weight: .bold))
-                                            .padding(.horizontal, 5).padding(.vertical, 1)
-                                            .background(remainingCount > 1 ? Color.blue.opacity(0.1) : Color.green.opacity(0.1))
-                                            .foregroundColor(remainingCount > 1 ? .blue : .green).cornerRadius(3)
-                                    }
-                                    ForEach(group.files) { file in
-                                        let fullPath = file.fullPath
-                                        let isDeleted = scanner.deletedPaths.contains(fullPath)
-                                        HStack(spacing: 8) {
-                                            SelectionButton(file: file, selectedFile: $selectedFile, isDeleted: isDeleted)
-                                            
-                                            if !isDeleted {
-                                                Button(action: { NSWorkspace.shared.open(URL(fileURLWithPath: file.path)) }) {
-                                                    Image(systemName: "folder")
-                                                        .font(.system(size: 9)).foregroundColor(.gray)
-                                                }
-                                                .buttonStyle(.plain).help("Open folder in Finder")
-
-                                                Button(action: { 
-                                                    if remainingCount > 1 { 
-                                                        if licenseManager.canPerformFreeDeletion() {
-                                                            scanner.recycleFile(atPath: fullPath)
-                                                            // Note: In a real app, we'd only count successful deletions. 
-                                                            // For simplicity here, we record the attempt.
-                                                            licenseManager.recordDeletion()
-                                                        } else {
-                                                            showingRegisterAlert = true
-                                                        }
-                                                    } 
-                                                }) {
-                                                    Image(systemName: remainingCount > 1 ? "trash" : "lock.fill")
-                                                        .font(.system(size: 9)).foregroundColor(remainingCount > 1 ? .gray : .green.opacity(0.5))
-                                                }
-                                                .buttonStyle(.plain).disabled(remainingCount <= 1)
-                                            } else {
-                                                Image(systemName: "checkmark.circle.fill").font(.system(size: 10)).foregroundColor(.red)
-                                            }
-                                        }
-                                        .padding(.leading, 12)
                                     }
                                 }
-                                .padding(6).background(remainingCount > 1 ? Color.orange.opacity(0.08) : Color.green.opacity(0.05)).cornerRadius(4)
+                            } else {
+                                ForEach(scanner.detectFolderDuplicates ? scanner.folderDuplicateGroups : []) { folderGroupRow($0) }
+                                ForEach(scanner.detectFolderDuplicates ? [] : scanner.duplicateGroups) { fileGroupRow($0) }
                             }
                         }
                         .padding(.horizontal)
@@ -432,7 +409,7 @@ struct ContentView: View {
                         VStack {
                             Image(systemName: scanner.duplicateGroups.isEmpty && !scanner.status.contains("Ready") ? "checkmark.circle" : "folder.badge.plus")
                                 .font(.system(size: 40)).foregroundColor(.gray.opacity(0.2))
-                            Text(scanner.duplicateGroups.isEmpty && !scanner.status.contains("Ready") ? "No duplicates found" : "Select a folder to begin")
+                            Text(scanner.duplicateGroups.isEmpty && !scanner.status.contains("Ready") ? "No duplicates found" : "Add folder(s) to begin")
                                 .font(.caption2).foregroundColor(.secondary)
                         }
                     }
@@ -530,22 +507,39 @@ struct ContentView: View {
             Text("⚠️ This action moves ALL detected duplicates to the Trash. This change is irreversible.\n\nNote: Original files (one per group) will be kept safe.")
         }
         .sheet(item: $previewFolderGroup) { fg in
-            FolderDiffPreviewSheet(
-                folderGroup: fg,
-                scanner: scanner,
-                onMerge: {
-                    folderGroupToMerge = fg
-                    previewFolderGroup = nil
-                },
-                onClose: { previewFolderGroup = nil }
-            )
+            if walkthroughActive && walkthroughIndex < walkthroughQueue.count {
+                // Walkthrough mode reuses this same sheet (a single sheet avoids the
+                // multiple-.sheet-on-one-view conflict). The sheet's item identity
+                // stays fixed; stepping swaps the content via .id(walkthroughIndex).
+                FolderDiffPreviewSheet(
+                    folderGroup: walkthroughQueue[walkthroughIndex],
+                    scanner: scanner,
+                    onMerge: {},
+                    onClose: { cancelWalkthrough() },
+                    progressLabel: "Folder \(walkthroughIndex + 1) of \(walkthroughQueue.count)",
+                    onApproveNext: { approveAndAdvance() },
+                    onSkip: { advanceWalkthrough() }
+                )
+                .id(walkthroughIndex)
+            } else {
+                FolderDiffPreviewSheet(
+                    folderGroup: fg,
+                    scanner: scanner,
+                    onMerge: {
+                        previewFolderGroup = nil
+                        if scanner.safeMergeToNewFolder { safeMergeSingle(fg) }
+                        else { folderGroupToMerge = fg }
+                    },
+                    onClose: { previewFolderGroup = nil }
+                )
+            }
         }
         .sheet(isPresented: $showingMergeAllSheet) {
             MergeAllConfirmationSheet(
                 scanner: scanner,
                 onMergeAll: {
-                    scanner.mergeAllFolders()
                     showingMergeAllSheet = false
+                    scanner.mergeFolders(scanner.folderDuplicateGroups, logDirectory: resolveLogDirectory())
                 },
                 onCancel: { showingMergeAllSheet = false }
             )
@@ -555,8 +549,8 @@ struct ContentView: View {
                 folderGroup: fg,
                 scanner: scanner,
                 onMerge: {
-                    scanner.mergeFolder(fg)
                     folderGroupToMerge = nil
+                    scanner.mergeFolder(fg, logDirectory: resolveLogDirectory())
                 },
                 onCancel: { folderGroupToMerge = nil }
             )
@@ -600,17 +594,345 @@ struct ContentView: View {
         if previewFolderGroup != nil { previewFolderGroup = nextGroup }
     }
 
+    private var selectedRootPaths: [String] { sourceFolders.map { $0.path } }
+
+    // The single selected root that contains all the given paths, or nil if they
+    // span more than one selected folder (a cross-folder duplicate). Longest match
+    // wins so nested selections resolve to the most specific folder.
+    private func owningRoot(_ paths: [String]) -> String? {
+        var roots = Set<String>()
+        for p in paths {
+            let matches = selectedRootPaths.filter { p == $0 || p.hasPrefix($0 + "/") }
+            if let best = matches.max(by: { $0.count < $1.count }) { roots.insert(best) }
+        }
+        return roots.count == 1 ? roots.first : nil
+    }
+
+    private func sectionKey(forFolderGroup fg: FolderDuplicateGroup) -> String {
+        owningRoot(fg.folders) ?? acrossKey
+    }
+    private func sectionKey(forFileGroup g: DuplicateGroup) -> String {
+        owningRoot(g.files.map { $0.path }) ?? acrossKey
+    }
+
+    private func sectionCount(_ key: String) -> Int {
+        scanner.detectFolderDuplicates
+            ? scanner.folderDuplicateGroups.filter { sectionKey(forFolderGroup: $0) == key }.count
+            : scanner.duplicateGroups.filter { sectionKey(forFileGroup: $0) == key }.count
+    }
+
+    // Ordered section keys (selected folders first in selection order, then the
+    // "across folders" bucket). Empty when only one folder is selected — then the
+    // list stays flat.
+    private var resultSections: [String] {
+        guard sourceFolders.count >= 2 else { return [] }
+        var keys = selectedRootPaths.filter { sectionCount($0) > 0 }
+        if sectionCount(acrossKey) > 0 { keys.append(acrossKey) }
+        return keys
+    }
+
+    @ViewBuilder
+    private func folderGroupRow(_ folderGroup: FolderDuplicateGroup) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "folder.badge.questionmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.indigo)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(URL(fileURLWithPath: folderGroup.keepFolder).lastPathComponent)
+                        .fontWeight(.bold).font(.system(size: 12))
+                    Text(folderGroup.keepFolder)
+                        .font(.system(size: 9, design: .monospaced)).foregroundColor(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.system(size: 9)).foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    if folderGroup.otherFolders.count == 1 {
+                        Text(URL(fileURLWithPath: folderGroup.folderB).lastPathComponent)
+                            .fontWeight(.bold).font(.system(size: 12))
+                        Text(folderGroup.folderB)
+                            .font(.system(size: 9, design: .monospaced)).foregroundColor(.secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                    } else {
+                        Text("\(folderGroup.otherFolders.count) other folders")
+                            .fontWeight(.bold).font(.system(size: 12)).foregroundColor(.indigo)
+                        ForEach(folderGroup.otherFolders, id: \.self) { path in
+                            Text(path)
+                                .font(.system(size: 9, design: .monospaced)).foregroundColor(.secondary)
+                                .lineLimit(1).truncationMode(.middle)
+                                .help(path)
+                        }
+                    }
+                }
+                Spacer()
+                Text("\(Int(folderGroup.matchRatio * 100))% match")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.indigo)
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(Color.indigo.opacity(0.1)).cornerRadius(3)
+                    .help(folderGroup.tooltipText)
+            }
+            HStack(spacing: 12) {
+                Text("\(folderGroup.matchedGroups.count) shared files")
+                    .font(.system(size: 9)).foregroundColor(.secondary)
+                if !folderGroup.uniqueToB.isEmpty {
+                    Text("\(folderGroup.uniqueToB.count) unique to merge")
+                        .font(.system(size: 9)).foregroundColor(.secondary)
+                }
+                Text(scanner.formatBytes(Int64(folderGroup.totalSizeBytes)))
+                    .font(.system(size: 9, weight: .medium)).foregroundColor(.secondary)
+                Spacer()
+                HStack(spacing: 4) {
+                    Image(systemName: "internaldrive").font(.system(size: 8))
+                    Text("Saves \(scanner.formatBytes(Int64(folderGroup.potentialSavings)))")
+                        .font(.system(size: 9, weight: .medium))
+                }
+                .foregroundColor(.green)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.green.opacity(0.4), lineWidth: 1))
+                Button(action: {
+                    if scanner.safeMergeToNewFolder { safeMergeSingle(folderGroup) }
+                    else { folderGroupToMerge = folderGroup }
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: scanner.safeMergeToNewFolder ? "doc.on.doc" : "arrow.triangle.merge")
+                        Text(scanner.safeMergeToNewFolder ? "Merge to New" : "Merge & Clean")
+                    }
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.indigo)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(Color.indigo.opacity(0.1)).cornerRadius(5)
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.indigo.opacity(0.3), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .disabled(scanner.isScanning)
+            }
+            .padding(.leading, 4)
+        }
+        .padding(6)
+        .background(selectedFolderGroupID == folderGroup.id ? Color.indigo.opacity(0.18) : Color.indigo.opacity(0.06))
+        .cornerRadius(4)
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(selectedFolderGroupID == folderGroup.id ? Color.indigo.opacity(0.6) : Color.clear, lineWidth: 1.5)
+        )
+        .onTapGesture { selectedFolderGroupID = folderGroup.id; selectedFile = nil }
+    }
+
+    @ViewBuilder
+    private func fileGroupRow(_ group: DuplicateGroup) -> some View {
+        let remainingCount = group.files.filter { !scanner.deletedPaths.contains($0.fullPath) }.count
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                if group.isSymlinkGroup {
+                    Image(systemName: "link")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.purple)
+                        .frame(width: 14, height: 14)
+                } else {
+                    FileIconView(path: group.files.first?.fullPath ?? "", size: 14)
+                }
+                Text(group.name).fontWeight(.bold).font(.system(size: 12))
+                if group.isSymlinkGroup {
+                    Text("symlink").font(.system(size: 8, weight: .medium))
+                        .foregroundColor(.purple)
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Color.purple.opacity(0.1)).cornerRadius(3)
+                }
+                Text("(\(group.size))").font(.caption2).foregroundColor(.secondary)
+                Spacer()
+                if let c = group.confidence {
+                    let pct = Int(c.overall * 100)
+                    let color: Color = c.overall >= 0.75 ? .orange : (c.overall >= 0.5 ? .yellow : .gray)
+                    Text("\(pct)% match")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(color)
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(color.opacity(0.12)).cornerRadius(3)
+                        .help(c.tooltipText)
+                }
+                Text("\(remainingCount) copies").font(.system(size: 9, weight: .bold))
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(remainingCount > 1 ? Color.blue.opacity(0.1) : Color.green.opacity(0.1))
+                    .foregroundColor(remainingCount > 1 ? .blue : .green).cornerRadius(3)
+            }
+            ForEach(group.files) { file in
+                let fullPath = file.fullPath
+                let isDeleted = scanner.deletedPaths.contains(fullPath)
+                HStack(spacing: 8) {
+                    SelectionButton(file: file, selectedFile: $selectedFile, isDeleted: isDeleted)
+
+                    if !isDeleted {
+                        Button(action: { NSWorkspace.shared.open(URL(fileURLWithPath: file.path)) }) {
+                            Image(systemName: "folder")
+                                .font(.system(size: 9)).foregroundColor(.gray)
+                        }
+                        .buttonStyle(.plain).help("Open folder in Finder")
+
+                        Button(action: {
+                            if remainingCount > 1 {
+                                if licenseManager.canPerformFreeDeletion() {
+                                    scanner.recycleFile(atPath: fullPath)
+                                    licenseManager.recordDeletion()
+                                } else {
+                                    showingRegisterAlert = true
+                                }
+                            }
+                        }) {
+                            Image(systemName: remainingCount > 1 ? "trash" : "lock.fill")
+                                .font(.system(size: 9)).foregroundColor(remainingCount > 1 ? .gray : .green.opacity(0.5))
+                        }
+                        .buttonStyle(.plain).disabled(remainingCount <= 1)
+                    } else {
+                        Image(systemName: "checkmark.circle.fill").font(.system(size: 10)).foregroundColor(.red)
+                    }
+                }
+                .padding(.leading, 12)
+            }
+        }
+        .padding(6).background(remainingCount > 1 ? Color.orange.opacity(0.08) : Color.green.opacity(0.05)).cornerRadius(4)
+    }
+
+    @ViewBuilder
+    private func collapsibleSectionHeader(_ key: String) -> some View {
+        let isCollapsed = collapsedRoots.contains(key)
+        let isAcross = key == acrossKey
+        Button(action: {
+            if isCollapsed { collapsedRoots.remove(key) } else { collapsedRoots.insert(key) }
+        }) {
+            HStack(spacing: 6) {
+                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 10, weight: .bold)).foregroundColor(.blue)
+                    .frame(width: 12)
+                Image(systemName: isAcross ? "arrow.triangle.branch" : "folder.fill")
+                    .font(.system(size: 11)).foregroundColor(.blue)
+                Text(isAcross ? "Across multiple folders" : URL(fileURLWithPath: key).lastPathComponent)
+                    .font(.system(size: 12, weight: .bold)).foregroundColor(.primary)
+                if !isAcross {
+                    Text(key)
+                        .font(.system(size: 9, design: .monospaced)).foregroundColor(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+                Spacer()
+                Text("\(sectionCount(key))")
+                    .font(.system(size: 10, weight: .bold)).foregroundColor(.secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .background(Color.blue.opacity(0.12)).cornerRadius(8)
+            }
+            .padding(.vertical, 5).padding(.horizontal, 8)
+            .background(Color.blue.opacity(0.08)).cornerRadius(4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private func selectSource() {
-        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.allowsMultipleSelection = false
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
         if panel.runModal() == .OK {
-            self.sourceURL = panel.url
-            startScanning()
+            for url in panel.urls where !sourceFolders.contains(url) {
+                sourceFolders.append(url)
+            }
         }
     }
-    
+
     private func startScanning() {
-        guard let source = sourceURL else { return }
-        scanner.startScan(sourceURL: source)
+        if scanner.isScanning { scanner.stopScan(); return }
+        guard !sourceFolders.isEmpty else { return }
+        scanner.startScan(sourceURLs: sourceFolders)
+    }
+
+    // MARK: - One-by-one merge walkthrough
+
+    private func startWalkthrough() {
+        walkthroughQueue = scanner.folderDuplicateGroups
+        guard let first = walkthroughQueue.first else { return }
+        walkthroughIndex = 0
+        approvedFolderIDs = []
+        walkthroughActive = true
+        previewFolderGroup = first   // presents the shared preview sheet in walkthrough mode
+    }
+
+    private func approveAndAdvance() {
+        approvedFolderIDs.insert(walkthroughQueue[walkthroughIndex].id)
+        advanceWalkthrough()
+    }
+
+    private func advanceWalkthrough() {
+        let next = walkthroughIndex + 1
+        if next >= walkthroughQueue.count {
+            finishWalkthrough()
+        } else {
+            walkthroughIndex = next
+        }
+    }
+
+    private func finishWalkthrough() {
+        walkthroughActive = false
+        previewFolderGroup = nil
+        let approved = walkthroughQueue.filter { approvedFolderIDs.contains($0.id) }
+        guard !approved.isEmpty else { return }
+        if scanner.safeMergeToNewFolder { safeMergeBatch(approved) }
+        else { scanner.mergeFolders(approved, logDirectory: resolveLogDirectory()) }
+    }
+
+    private func cancelWalkthrough() {
+        walkthroughActive = false
+        previewFolderGroup = nil
+        approvedFolderIDs = []
+    }
+
+    // When the log mode is "ask each time", prompt for a folder; otherwise return nil
+    // so the scanner writes to its default app logs folder.
+    private func resolveLogDirectory() -> URL? {
+        guard scanner.logLocationMode == .askEachTime else { return nil }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.message = "Choose where to save the merge log (JSON + HTML)."
+        panel.prompt = "Save Log Here"
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    // MARK: - Safe merge (copy to a destination chosen when the toggle is enabled)
+
+    private func chooseSafeMergeDestination() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.message = "Choose the destination folder for merged copies. Originals are kept untouched; one merged subfolder is created per cluster."
+        panel.prompt = "Choose Destination"
+        if panel.runModal() == .OK, let url = panel.url {
+            safeMergeDestination = url
+        } else {
+            // Cancelled — revert the toggle
+            scanner.safeMergeToNewFolder = false
+            safeMergeDestination = nil
+        }
+    }
+
+    private func safeMergeSingle(_ fg: FolderDuplicateGroup) {
+        guard let parent = safeMergeDestination ?? promptDestinationFallback() else { return }
+        scanner.safeMergeFolders([fg], intoParent: parent, logDirectory: resolveLogDirectory())
+    }
+
+    private func safeMergeBatch(_ groups: [FolderDuplicateGroup]) {
+        guard !groups.isEmpty else { return }
+        guard let parent = safeMergeDestination ?? promptDestinationFallback() else { return }
+        scanner.safeMergeFolders(groups, intoParent: parent, logDirectory: resolveLogDirectory())
+    }
+
+    // Safety net: if a copy-merge is triggered without a stored destination, ask now.
+    private func promptDestinationFallback() -> URL? {
+        chooseSafeMergeDestination()
+        return safeMergeDestination
     }
 }
 
@@ -631,7 +953,14 @@ struct FolderDiffPreviewSheet: View {
     @ObservedObject var scanner: FileScanner
     let onMerge: () -> Void
     let onClose: () -> Void
+    // Walkthrough mode (one-by-one review). When onApproveNext is non-nil, the sheet
+    // shows progress + Cancel / Skip / Merge & Next instead of Close / Merge & Clean.
+    var progressLabel: String? = nil
+    var onApproveNext: (() -> Void)? = nil
+    var onSkip: (() -> Void)? = nil
     @State private var focusedRowIndex: Int = -1
+
+    private var isWalkthrough: Bool { onApproveNext != nil }
 
     private var nameA: String { URL(fileURLWithPath: folderGroup.folderA).lastPathComponent }
     private var nameB: String { URL(fileURLWithPath: folderGroup.folderB).lastPathComponent }
@@ -662,22 +991,34 @@ struct FolderDiffPreviewSheet: View {
 
     private var diffRows: [DiffRow] {
         let aKeys = filesInAKeys
+        let keep = folderGroup.keepFolder
+        let moveIDs = Set(folderGroup.filesToMove.map { $0.id })
         var rows: [DiffRow] = []
+
+        // DELETE rows — every removable duplicate copy (all copies except the kept/moved one)
         for group in folderGroup.matchedGroups.sorted(by: { $0.name < $1.name }) {
-            if let fA = group.files.first(where: { $0.path == folderGroup.folderA }),
-               let fB = group.files.first(where: { $0.path == folderGroup.folderB }) {
-                rows.append(DiffRow(kind: .matched(fileA: fA, fileB: fB)))
+            let keepCopy = group.files.first { $0.path == keep }
+            let moveRep = group.files.first { moveIDs.contains($0.id) }
+            let kept = keepCopy ?? moveRep
+            for f in group.files {
+                if f.path == keep { continue }       // keep's copy stays
+                if moveIDs.contains(f.id) { continue } // this one is shown as MOVE below
+                rows.append(DiffRow(kind: .matched(fileA: kept ?? f, fileB: f)))
             }
         }
-        for file in folderGroup.uniqueToA.sorted(by: { $0.name < $1.name }) {
+
+        // NO CHANGE rows — files that exist only in the keep folder
+        for file in folderGroup.uniqueToKeep.sorted(by: { $0.name < $1.name }) {
             rows.append(DiffRow(kind: .uniqueToA(file)))
         }
-        let folderBName = URL(fileURLWithPath: folderGroup.folderB).lastPathComponent
+
+        // MOVE rows — unique files brought into keep from the other folders
         let nameCollisions = filenamesInA
-        for file in folderGroup.uniqueToB.sorted(by: { $0.name < $1.name }) {
+        for file in folderGroup.filesToMove.sorted(by: { $0.name < $1.name }) {
+            let sourceFolderName = URL(fileURLWithPath: file.path).lastPathComponent
             let wouldDuplicate = aKeys.contains("\(file.name)_\(file.sizeBytes)")
             let renamedTo: String? = (!wouldDuplicate && nameCollisions.contains(file.name))
-                ? FileScanner.resolveCollisionName(for: file.name, sourceFolderName: folderBName)
+                ? FileScanner.resolveCollisionName(for: file.name, sourceFolderName: sourceFolderName)
                 : nil
             rows.append(DiffRow(kind: .uniqueToB(file, wouldDuplicate: wouldDuplicate, renamedTo: renamedTo)))
         }
@@ -686,6 +1027,19 @@ struct FolderDiffPreviewSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
+
+            // Walkthrough progress strip
+            if let progressLabel {
+                HStack(spacing: 8) {
+                    Image(systemName: "rectangle.stack.badge.play").foregroundColor(.indigo)
+                    Text("Reviewing folder pairs").font(.system(size: 11, weight: .bold))
+                    Spacer()
+                    Text(progressLabel).font(.system(size: 11, weight: .semibold)).foregroundColor(.indigo)
+                }
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(Color.indigo.opacity(0.08))
+                Divider()
+            }
 
             // Content area with column background strip
             VStack(spacing: 0) {
@@ -710,7 +1064,8 @@ struct FolderDiffPreviewSheet: View {
                     VStack(spacing: 2) {
                         HStack(spacing: 6) {
                             Image(systemName: "folder.fill").foregroundColor(.red)
-                            Text(nameB).fontWeight(.bold).font(.system(size: 13))
+                            Text(folderGroup.otherFolders.count == 1 ? nameB : "\(folderGroup.otherFolders.count) folders")
+                                .fontWeight(.bold).font(.system(size: 13))
                         }
                         Text("MERGE & CLEAN").font(.system(size: 9, weight: .bold)).foregroundColor(.red)
                     }
@@ -784,28 +1139,68 @@ struct FolderDiffPreviewSheet: View {
                 Text("\(folderGroup.matchedGroups.count) duplicate · \(folderGroup.uniqueToB.count) to move · \(folderGroup.uniqueToA.count) unchanged")
                     .font(.system(size: 10)).foregroundColor(.secondary)
                 Spacer()
-                Button("Close", action: onClose).buttonStyle(.bordered)
-                Button(action: onMerge) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.triangle.merge")
-                        Text("Merge & Clean")
+                if isWalkthrough {
+                    Button("Cancel", action: onClose).buttonStyle(.bordered)
+                        .help("Cancel the whole review — nothing is changed")
+                    Button(action: { onSkip?() }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.uturn.forward")
+                            Text("Skip")
+                        }
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(Color.gray.opacity(0.15)).cornerRadius(7)
                     }
-                    .fontWeight(.semibold).foregroundColor(.white)
-                    .padding(.horizontal, 14).padding(.vertical, 7)
-                    .background(Color.indigo).cornerRadius(7)
+                    .buttonStyle(.plain)
+                    .help("Leave this folder untouched and go to the next (→)")
+                    Button(action: { onApproveNext?() }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.triangle.merge")
+                            Text("Merge & Next")
+                        }
+                        .fontWeight(.semibold).foregroundColor(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 7)
+                        .background(Color.indigo).cornerRadius(7)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Approve this merge and go to the next (Return)")
+                } else {
+                    Button("Close", action: onClose).buttonStyle(.bordered)
+                    Button(action: onMerge) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.triangle.merge")
+                            Text("Merge & Clean")
+                        }
+                        .fontWeight(.semibold).foregroundColor(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 7)
+                        .background(Color.indigo).cornerRadius(7)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
             .padding(12)
         }
         .frame(width: 820, height: 560)
-        // Space bar closes the sheet, mirroring the Close button
+        // Keyboard shortcuts
         .background(
-            Button("") { onClose() }
-                .keyboardShortcut(.space, modifiers: [])
-                .buttonStyle(.plain)
-                .opacity(0)
-                .frame(width: 0, height: 0)
+            Group {
+                if isWalkthrough {
+                    Button("") { onApproveNext?() }
+                        .keyboardShortcut(.return, modifiers: [])
+                        .buttonStyle(.plain).opacity(0).frame(width: 0, height: 0)
+                    Button("") { onSkip?() }
+                        .keyboardShortcut(.rightArrow, modifiers: [])
+                        .buttonStyle(.plain).opacity(0).frame(width: 0, height: 0)
+                    Button("") { onClose() }
+                        .keyboardShortcut(.cancelAction)
+                        .buttonStyle(.plain).opacity(0).frame(width: 0, height: 0)
+                } else {
+                    // Space bar closes the sheet, mirroring the Close button
+                    Button("") { onClose() }
+                        .keyboardShortcut(.space, modifiers: [])
+                        .buttonStyle(.plain).opacity(0).frame(width: 0, height: 0)
+                }
+            }
         )
     }
 

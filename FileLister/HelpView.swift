@@ -1,13 +1,15 @@
 import SwiftUI
 
 enum HelpSection: String, CaseIterable, Identifiable {
-    case welcome      = "Welcome to FileLister"
-    case atAGlance    = "FileLister at a Glance"
+    case welcome          = "Welcome to FileLister"
+    case atAGlance        = "FileLister at a Glance"
+    case folderDuplicates = "Folder Duplicates & Merging"
     var id: String { rawValue }
     var icon: String {
         switch self {
-        case .welcome:   return "star.circle.fill"
-        case .atAGlance: return "rectangle.on.rectangle"
+        case .welcome:          return "star.circle.fill"
+        case .atAGlance:        return "rectangle.on.rectangle"
+        case .folderDuplicates: return "folder.badge.questionmark"
         }
     }
 }
@@ -27,9 +29,10 @@ struct HelpView: View {
             ScrollView {
                 Group {
                     switch selection {
-                    case .welcome:   WelcomeSection()
-                    case .atAGlance: AtAGlanceSection()
-                    case nil:        WelcomeSection()
+                    case .welcome:          WelcomeSection()
+                    case .atAGlance:        AtAGlanceSection()
+                    case .folderDuplicates: FolderDuplicatesSection()
+                    case nil:               WelcomeSection()
                     }
                 }
                 .padding(32)
@@ -260,6 +263,102 @@ private struct AtAGlanceSection: View {
     }
 }
 
+// ── Folder Duplicates & Merging ───────────────────────────────────────────────
+
+private struct FolderDuplicatesSection: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 28) {
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Folder Duplicates & Merging")
+                    .font(.largeTitle).fontWeight(.bold)
+                Text("How FileLister finds duplicate folders, groups them, and merges them — and why similar-looking folders are sometimes kept apart.")
+                    .font(.subheadline).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Divider()
+
+            helpGroup(title: "What it does") {
+                Text("With the Folders option enabled, FileLister looks beyond individual files and finds folders that contain largely the same files. Instead of listing hundreds of separate duplicate files, it shows you the folders themselves so you can merge and clean them in one step.")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Divider()
+
+            helpGroup(title: "How folders are matched") {
+                featureRow(icon: "shield.checkerboard", color: .purple,
+                           title: "Byte-identical content (SHA-256)",
+                           body: "Two files count as \"the same\" only when their contents are byte-for-byte identical, verified with a SHA-256 fingerprint. Filenames are ignored for matching — only the actual bytes matter.")
+                featureRow(icon: "percent", color: .blue,
+                           title: "Match ratio",
+                           body: "For any two folders, the match ratio is the number of shared (byte-identical) files divided by the file count of the smaller folder. 100% means the smaller folder is fully contained in the other.")
+                featureRow(icon: "slider.horizontal.3", color: .teal,
+                           title: "The Match threshold",
+                           body: "The Match slider sets how similar folders must be to be treated as duplicates (50%–100%). Folders are only grouped when their match ratio meets or exceeds this threshold. Lower it to catch looser matches; raise it to be stricter.")
+            }
+
+            Divider()
+
+            helpGroup(title: "Clustering — folders are grouped, not paired") {
+                Text("When three or more folders are all similar to one another, FileLister groups them into a single cluster rather than listing every pair separately. Each cluster has one keep folder (the one with the most files) and one or more other folders that merge into it. This is why a set of near-identical folders appears as a single result row, however many folders are involved.")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Divider()
+
+            helpGroup(title: "Why similar folders are sometimes kept separate") {
+                Text("You may see two or more result groups that share the same folder name — for example three results all called \"My Project\". This is intentional and correct:")
+                    .fixedSize(horizontal: false, vertical: true)
+                calloutRow(icon: "checkmark.seal.fill", color: .green,
+                           text: "A shared folder name does not make folders duplicates. FileLister compares the actual file contents, not the names.")
+                calloutRow(icon: "doc.on.doc", color: .orange,
+                           text: "Different versions of the same project usually share filenames but have different bytes inside (an edited drawing, a re-exported file, a newer build). Those files are not byte-identical, so they don't count toward the match ratio.")
+                calloutRow(icon: "scissors", color: .blue,
+                           text: "If the shared (byte-identical) portion falls below your Match threshold, the folders stay in separate clusters — each becomes its own result.")
+                calloutRow(icon: "lock.shield", color: .purple,
+                           text: "This is the safe behaviour: it prevents different versions from being fused into one folder, which could overwrite or hide the version you actually wanted to keep.")
+                Text("If you want looser, version-tolerant grouping, lower the Match threshold — but be aware this starts grouping folders that are not byte-identical, so review the preview before merging.")
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+            }
+
+            Divider()
+
+            helpGroup(title: "What a merge does") {
+                Text("Merging a cluster keeps one folder and brings the others' content into it:")
+                    .fixedSize(horizontal: false, vertical: true)
+                calloutRow(icon: "arrow.left.circle.fill", color: .blue,
+                           text: "Files that exist only in the other folders are moved into the keep folder. If a name already exists there, the incoming file is renamed (e.g. \"file_moved_from_OtherFolder.ext\") so nothing is overwritten.")
+                calloutRow(icon: "xmark.circle.fill", color: .red,
+                           text: "Files that are already byte-identical to a copy in the keep folder are redundant and are removed (the other folders are sent to Trash once their unique files have been moved out).")
+                calloutRow(icon: "minus.circle", color: .gray,
+                           text: "Files only in the keep folder are left unchanged.")
+                Text("Press Space on a selected folder result to preview every action (Keep · Operations · Merge & Clean) before committing.")
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+            }
+
+            Divider()
+
+            helpGroup(title: "Merge options") {
+                featureRow(icon: "arrow.triangle.merge", color: .indigo,
+                           title: "Merge & Clean / Merge All",
+                           body: "Performs the merge in place: other folders are sent to Trash after their unique files move into the keep folder. Nothing is permanently deleted — everything goes to the Trash.")
+                featureRow(icon: "rectangle.stack.badge.play", color: .indigo,
+                           title: "Review One-by-One",
+                           body: "Steps through each cluster so you can approve (Return), skip (→), or cancel (Esc). Approved merges run together at the end; cancelling applies nothing.")
+                featureRow(icon: "doc.on.doc", color: .green,
+                           title: "Copy to new folder",
+                           body: "Non-destructive mode. Instead of changing your originals, FileLister writes the merged result into a new folder you choose, leaving every original folder exactly as it was.")
+                featureRow(icon: "pencil", color: .orange,
+                           title: "Rename kept folder",
+                           body: "When on, the kept folder is renamed with a merged tag. When off, it keeps its original name and simply gains the merged files. (Copy-to-new-folder always names its new folder with the merged tag.)")
+            }
+        }
+    }
+}
+
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
 private func helpGroup<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -277,6 +376,18 @@ private func glanceGroup<Content: View>(title: String, icon: String, @ViewBuilde
             .font(.headline)
             .foregroundColor(.primary)
         content()
+    }
+}
+
+private func calloutRow(icon: String, color: Color, text: String) -> some View {
+    HStack(alignment: .top, spacing: 10) {
+        Image(systemName: icon)
+            .font(.system(size: 14))
+            .foregroundColor(color)
+            .frame(width: 20)
+        Text(text)
+            .foregroundColor(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
