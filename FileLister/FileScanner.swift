@@ -722,6 +722,15 @@ class FileScanner: ObservableObject {
         }
     }
     
+    static func resolveCollisionName(for fileName: String, sourceFolderName: String) -> String {
+        let ext = URL(fileURLWithPath: fileName).pathExtension
+        let base = ext.isEmpty ? fileName : String(fileName.dropLast(ext.count + 1))
+        let safe = sourceFolderName.replacingOccurrences(of: "/", with: "_")
+        return ext.isEmpty
+            ? "\(base)_moved_from_\(safe)"
+            : "\(base)_moved_from_\(safe).\(ext)"
+    }
+
     func computeMergedFolderName(folderA: String, folderB: String) -> String {
         let nameA = URL(fileURLWithPath: folderA).lastPathComponent
         let nameB = URL(fileURLWithPath: folderB).lastPathComponent
@@ -756,12 +765,20 @@ class FileScanner: ObservableObject {
                 var destName = file.name
                 var destURL = URL(fileURLWithPath: folderGroup.folderA).appendingPathComponent(destName)
 
-                // Rename on collision
+                // Rename on collision using source folder name for traceability
                 if fileManager.fileExists(atPath: destURL.path) {
-                    let ext = srcURL.pathExtension
-                    let base = ext.isEmpty ? destName : String(destName.dropLast(ext.count + 1))
-                    destName = ext.isEmpty ? "\(base)_merged" : "\(base)_merged.\(ext)"
+                    let folderBName = URL(fileURLWithPath: folderGroup.folderB).lastPathComponent
+                    destName = FileScanner.resolveCollisionName(for: file.name, sourceFolderName: folderBName)
                     destURL = URL(fileURLWithPath: folderGroup.folderA).appendingPathComponent(destName)
+                    // Handle further collision (extremely unlikely)
+                    var suffix = 2
+                    while fileManager.fileExists(atPath: destURL.path) {
+                        let ext = URL(fileURLWithPath: destName).pathExtension
+                        let base = ext.isEmpty ? destName : String(destName.dropLast(ext.count + 1))
+                        let candidate = ext.isEmpty ? "\(base)_\(suffix)" : "\(base)_\(suffix).\(ext)"
+                        destURL = URL(fileURLWithPath: folderGroup.folderA).appendingPathComponent(candidate)
+                        suffix += 1
+                    }
                 }
 
                 do {
@@ -830,15 +847,22 @@ class FileScanner: ObservableObject {
                 }
 
                 // Step 1: move unique files from B → A
+                let folderBName = URL(fileURLWithPath: folderGroup.folderB).lastPathComponent
                 for file in folderGroup.uniqueToB {
                     let srcURL = URL(fileURLWithPath: file.fullPath)
                     var destName = file.name
                     var destURL = URL(fileURLWithPath: folderGroup.folderA).appendingPathComponent(destName)
                     if fileManager.fileExists(atPath: destURL.path) {
-                        let ext = srcURL.pathExtension
-                        let base = ext.isEmpty ? destName : String(destName.dropLast(ext.count + 1))
-                        destName = ext.isEmpty ? "\(base)_merged" : "\(base)_merged.\(ext)"
+                        destName = FileScanner.resolveCollisionName(for: file.name, sourceFolderName: folderBName)
                         destURL = URL(fileURLWithPath: folderGroup.folderA).appendingPathComponent(destName)
+                        var suffix = 2
+                        while fileManager.fileExists(atPath: destURL.path) {
+                            let ext = URL(fileURLWithPath: destName).pathExtension
+                            let base = ext.isEmpty ? destName : String(destName.dropLast(ext.count + 1))
+                            let candidate = ext.isEmpty ? "\(base)_\(suffix)" : "\(base)_\(suffix).\(ext)"
+                            destURL = URL(fileURLWithPath: folderGroup.folderA).appendingPathComponent(candidate)
+                            suffix += 1
+                        }
                     }
                     if (try? fileManager.moveItem(at: srcURL, to: destURL)) == nil { errorCount += 1 }
                 }

@@ -620,7 +620,7 @@ struct DiffRow: Identifiable {
     enum Kind {
         case matched(fileA: DuplicateFileInfo, fileB: DuplicateFileInfo)
         case uniqueToA(DuplicateFileInfo)
-        case uniqueToB(DuplicateFileInfo, wouldDuplicate: Bool)
+        case uniqueToB(DuplicateFileInfo, wouldDuplicate: Bool, renamedTo: String?)
     }
     let id = UUID()
     let kind: Kind
@@ -648,6 +648,18 @@ struct FolderDiffPreviewSheet: View {
         return keys
     }
 
+    // filename-only set for name collision detection
+    private var filenamesInA: Set<String> {
+        var names = Set<String>()
+        for group in folderGroup.matchedGroups {
+            if let fA = group.files.first(where: { $0.path == folderGroup.folderA }) {
+                names.insert(fA.name)
+            }
+        }
+        for f in folderGroup.uniqueToA { names.insert(f.name) }
+        return names
+    }
+
     private var diffRows: [DiffRow] {
         let aKeys = filesInAKeys
         var rows: [DiffRow] = []
@@ -660,9 +672,14 @@ struct FolderDiffPreviewSheet: View {
         for file in folderGroup.uniqueToA.sorted(by: { $0.name < $1.name }) {
             rows.append(DiffRow(kind: .uniqueToA(file)))
         }
+        let folderBName = URL(fileURLWithPath: folderGroup.folderB).lastPathComponent
+        let nameCollisions = filenamesInA
         for file in folderGroup.uniqueToB.sorted(by: { $0.name < $1.name }) {
             let wouldDuplicate = aKeys.contains("\(file.name)_\(file.sizeBytes)")
-            rows.append(DiffRow(kind: .uniqueToB(file, wouldDuplicate: wouldDuplicate)))
+            let renamedTo: String? = (!wouldDuplicate && nameCollisions.contains(file.name))
+                ? FileScanner.resolveCollisionName(for: file.name, sourceFolderName: folderBName)
+                : nil
+            rows.append(DiffRow(kind: .uniqueToB(file, wouldDuplicate: wouldDuplicate, renamedTo: renamedTo)))
         }
         return rows
     }
@@ -670,88 +687,99 @@ struct FolderDiffPreviewSheet: View {
     var body: some View {
         VStack(spacing: 0) {
 
-            // Header
-            HStack(spacing: 0) {
-                VStack(spacing: 2) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "folder.fill").foregroundColor(.green)
-                        Text(nameA).fontWeight(.bold).font(.system(size: 13))
-                    }
-                    Text("KEEP").font(.system(size: 9, weight: .bold)).foregroundColor(.green)
-                }
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(12)
-                .background(Color.green.opacity(0.08))
+            // Content area with column background strip
+            VStack(spacing: 0) {
 
-                Text("Operations")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(.secondary)
-                    .frame(width: 110)
-                    .padding(12)
-
-                VStack(spacing: 2) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "folder.fill").foregroundColor(.red)
-                        Text(nameB).fontWeight(.bold).font(.system(size: 13))
+                // Header
+                HStack(spacing: 0) {
+                    VStack(spacing: 2) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "folder.fill").foregroundColor(.green)
+                            Text(nameA).fontWeight(.bold).font(.system(size: 13))
+                        }
+                        Text("KEEP").font(.system(size: 9, weight: .bold)).foregroundColor(.green)
                     }
-                    Text("MERGE & CLEAN").font(.system(size: 9, weight: .bold)).foregroundColor(.red)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .background(Color.green.opacity(0.08))
+
+                    Text("Operations")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+                        .frame(minWidth: 110, maxWidth: 110, maxHeight: .infinity, alignment: .center)
+
+                    VStack(spacing: 2) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "folder.fill").foregroundColor(.red)
+                            Text(nameB).fontWeight(.bold).font(.system(size: 13))
+                        }
+                        Text("MERGE & CLEAN").font(.system(size: 9, weight: .bold)).foregroundColor(.red)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .background(Color.red.opacity(0.06))
                 }
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(12)
-                .background(Color.red.opacity(0.06))
+                .frame(height: 50)
+
+                Divider()
+
+                // Legend
+                HStack(spacing: 16) {
+                    legendItem(color: .orange, label: "Duplicate (kept in A)")
+                    legendItem(color: .red, label: "Duplicate (deleted from B)")
+                    legendItem(color: .blue, label: "Unique (moved to A)")
+                    legendItem(color: .orange, label: "Unique (moved & renamed)")
+                    legendItem(color: .secondary, label: "Unique (no change)")
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(Color.gray.opacity(0.04))
+
+                Divider()
+
+                // Diff rows
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(Array(diffRows.enumerated()), id: \.element.id) { index, row in
+                                diffRowView(row)
+                                    .background(index == focusedRowIndex ? Color.accentColor.opacity(0.12) : Color.clear)
+                                    .id(index)
+                                Divider().opacity(0.4)
+                            }
+                        }
+                    }
+                    .onChange(of: focusedRowIndex) { newIndex in
+                        withAnimation { proxy.scrollTo(newIndex, anchor: .center) }
+                    }
+                    .background(
+                        Group {
+                            Button("") {
+                                focusedRowIndex = max(0, focusedRowIndex < 0 ? 0 : focusedRowIndex - 1)
+                            }
+                            .keyboardShortcut(.upArrow, modifiers: [])
+                            .buttonStyle(.plain)
+                            .opacity(0).frame(width: 0, height: 0)
+
+                            Button("") {
+                                focusedRowIndex = min(diffRows.count - 1, focusedRowIndex < 0 ? 0 : focusedRowIndex + 1)
+                            }
+                            .keyboardShortcut(.downArrow, modifiers: [])
+                            .buttonStyle(.plain)
+                            .opacity(0).frame(width: 0, height: 0)
+                        }
+                    )
+                }
             }
+            .background(
+                HStack(spacing: 0) {
+                    Color.clear.frame(maxWidth: .infinity)
+                    Color(NSColor.windowBackgroundColor).frame(width: 110)
+                    Color.clear.frame(maxWidth: .infinity)
+                }
+                .ignoresSafeArea()
+            )
 
             Divider()
 
-            // Legend
-            HStack(spacing: 16) {
-                legendItem(color: .orange, label: "Duplicate (kept in A)")
-                legendItem(color: .red, label: "Duplicate (deleted from B)")
-                legendItem(color: .blue, label: "Unique (moved to A)")
-                legendItem(color: .secondary, label: "Unique (no change)")
-            }
-            .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(Color.gray.opacity(0.04))
-
-            Divider()
-
-            // Diff rows
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(diffRows.enumerated()), id: \.element.id) { index, row in
-                            diffRowView(row)
-                                .background(index == focusedRowIndex ? Color.accentColor.opacity(0.12) : Color.clear)
-                                .id(index)
-                            Divider().opacity(0.4)
-                        }
-                    }
-                }
-                .onChange(of: focusedRowIndex) { newIndex in
-                    withAnimation { proxy.scrollTo(newIndex, anchor: .center) }
-                }
-                .background(
-                    Group {
-                        Button("") {
-                            focusedRowIndex = max(0, focusedRowIndex < 0 ? 0 : focusedRowIndex - 1)
-                        }
-                        .keyboardShortcut(.upArrow, modifiers: [])
-                        .buttonStyle(.plain)
-                        .opacity(0).frame(width: 0, height: 0)
-
-                        Button("") {
-                            focusedRowIndex = min(diffRows.count - 1, focusedRowIndex < 0 ? 0 : focusedRowIndex + 1)
-                        }
-                        .keyboardShortcut(.downArrow, modifiers: [])
-                        .buttonStyle(.plain)
-                        .opacity(0).frame(width: 0, height: 0)
-                    }
-                )
-            }
-
-            Divider()
-
-            // Footer
+            // Footer — no column background
             HStack {
                 Text("\(folderGroup.matchedGroups.count) duplicate · \(folderGroup.uniqueToB.count) to move · \(folderGroup.uniqueToA.count) unchanged")
                     .font(.system(size: 10)).foregroundColor(.secondary)
@@ -770,14 +798,6 @@ struct FolderDiffPreviewSheet: View {
             }
             .padding(12)
         }
-        .background(
-            HStack(spacing: 0) {
-                Color.clear.frame(maxWidth: .infinity)
-                Color(NSColor.windowBackgroundColor).frame(width: 110)
-                Color.clear.frame(maxWidth: .infinity)
-            }
-            .ignoresSafeArea()
-        )
         .frame(width: 820, height: 560)
         // Space bar closes the sheet, mirroring the Close button
         .background(
@@ -803,11 +823,15 @@ struct FolderDiffPreviewSheet: View {
                 operationCell(icon: "minus", label: "NO CHANGE", color: .secondary)
                 emptyCell()
 
-            case .uniqueToB(let f, let wouldDuplicate):
+            case .uniqueToB(let f, let wouldDuplicate, let renamedTo):
                 if wouldDuplicate {
                     emptyCell()
                     operationCell(icon: "xmark.circle.fill", label: "DELETE", color: .red)
                     fileCell(name: f.name, size: f.size, color: .red, icon: "doc.fill", side: .leading, strikethrough: true)
+                } else if let newName = renamedTo {
+                    emptyCell()
+                    operationCell(icon: "arrow.left.circle.fill", label: "MOVE & RENAME", color: .orange)
+                    fileCellRenamed(originalName: f.name, newName: newName, size: f.size)
                 } else {
                     emptyCell()
                     operationCell(icon: "arrow.left.circle.fill", label: "MOVE", color: .blue)
@@ -835,11 +859,43 @@ struct FolderDiffPreviewSheet: View {
     }
 
     private func operationCell(icon: String, label: String, color: Color) -> some View {
-        VStack(spacing: 2) {
-            Image(systemName: icon).font(.system(size: 13)).foregroundColor(color)
-            Text(label).font(.system(size: 7, weight: .bold)).foregroundColor(color)
+        HStack(spacing: 0) {
+            Spacer()
+            VStack(spacing: 0) {
+                Spacer()
+                VStack(spacing: 2) {
+                    Image(systemName: icon)
+                        .font(.system(size: 13))
+                        .foregroundColor(color)
+                    Text(label)
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundColor(color)
+                        .multilineTextAlignment(.center)
+                }
+                Spacer()
+            }
+            Spacer()
         }
         .frame(minWidth: 110, maxWidth: 110, minHeight: 0, maxHeight: .infinity)
+    }
+
+    private func fileCellRenamed(originalName: String, newName: String, size: String) -> some View {
+        VStack(spacing: 2) {
+            HStack(spacing: 5) {
+                Image(systemName: "doc.fill").font(.system(size: 10)).foregroundColor(.orange)
+                Text(newName)
+                    .font(.system(size: 11))
+                    .foregroundColor(.orange)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+            Text("was: \(originalName)")
+                .font(.system(size: 9))
+                .foregroundColor(.orange.opacity(0.7))
+                .lineLimit(1).truncationMode(.middle)
+            Text(size).font(.system(size: 9)).foregroundColor(.orange.opacity(0.6))
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
     private func emptyCell() -> some View {
