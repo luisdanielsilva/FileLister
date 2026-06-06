@@ -122,14 +122,19 @@ enum AppMode: String, CaseIterable, Identifiable {
 
 struct ContentView: View {
     @StateObject private var scanner = FileScanner()
+    @StateObject private var photoEngine = PhotoEngine()
     @EnvironmentObject var licenseManager: LicenseManager
     @State private var mode: AppMode = .files
+
+    // True when the engine for the active mode is scanning
+    private var activeScanning: Bool { mode == .photos ? photoEngine.isScanning : scanner.isScanning }
     @State private var sourceFolders: [URL] = []
     @State private var collapsedRoots: Set<String> = []
     private let acrossKey = "__across_multiple__"
     
     // Selection state for Quick Look
     @State private var selectedFile: DuplicateFileInfo? = nil
+    @State private var selectedPhotoID: UUID? = nil
     @State private var showingBatchDeleteConfirm = false
     @State private var showingRegisterAlert = false
     @State private var folderGroupToMerge: FolderDuplicateGroup? = nil
@@ -177,16 +182,16 @@ struct ContentView: View {
             HStack(spacing: 12) {
                 Button(action: { startScanning() }) {
                     HStack {
-                        Image(systemName: scanner.isScanning ? "stop.circle.fill" : "magnifyingglass.circle.fill")
-                        Text(scanner.isScanning ? "Stop" : "Search for Duplicates")
+                        Image(systemName: activeScanning ? "stop.circle.fill" : "magnifyingglass.circle.fill")
+                        Text(activeScanning ? "Stop" : "Search for Duplicates")
                     }
                     .fontWeight(.semibold)
                     .frame(width: 180, height: 32)
-                    .background((sourceFolders.isEmpty && !scanner.isScanning) || mode == .photos ? Color.gray.opacity(0.3) : Color.blue)
+                    .background(sourceFolders.isEmpty && !activeScanning ? Color.gray.opacity(0.3) : Color.blue)
                     .foregroundColor(.white)
                     .cornerRadius(6)
                 }
-                .disabled((sourceFolders.isEmpty && !scanner.isScanning) || mode == .photos)
+                .disabled(sourceFolders.isEmpty && !activeScanning)
                 .buttonStyle(.plain)
 
                 // Selected folders list + add button
@@ -277,13 +282,43 @@ struct ContentView: View {
                                 .disabled(scanner.isScanning)
                             Text("\(Int(scanner.folderMatchThreshold * 100))%").font(.system(size: 10, weight: .medium)).frame(width: 28)
                         }
+                    } else if mode == .photos {
+                        HStack(spacing: 4) {
+                            Text("Similarity:").font(.system(size: 10)).foregroundColor(.secondary)
+                            Slider(value: $photoEngine.matchThreshold, in: 0.70...1.0, step: 0.01)
+                                .frame(width: 90)
+                                .disabled(photoEngine.isScanning)
+                            Text("\(Int(photoEngine.matchThreshold * 100))%").font(.system(size: 10, weight: .medium)).frame(width: 32)
+                        }
+                        Toggle(isOn: $photoEngine.requireExifCorroboration) {
+                            Label("EXIF corroboration", systemImage: "calendar.badge.clock").font(.system(size: 10))
+                        }
+                        .toggleStyle(.checkbox).disabled(photoEngine.isScanning)
+                        .help("Also require a metadata match (same capture time, or same camera + dimensions) before grouping two photos.")
+
+                        Toggle(isOn: $photoEngine.expandByMetadata) {
+                            Label("Expand by metadata", systemImage: "wand.and.stars").font(.system(size: 10))
+                        }
+                        .toggleStyle(.checkbox).disabled(photoEngine.isScanning)
+                        .help("After visual grouping, pull in additional photos that share the selected metadata (e.g. captured at the same time/place).")
+
+                        if photoEngine.expandByMetadata {
+                            Toggle("Time", isOn: $photoEngine.expandUseTime)
+                                .toggleStyle(.checkbox).font(.system(size: 10)).disabled(photoEngine.isScanning)
+                            Toggle("GPS", isOn: $photoEngine.expandUseGPS)
+                                .toggleStyle(.checkbox).font(.system(size: 10)).disabled(photoEngine.isScanning)
+                            Toggle("Camera", isOn: $photoEngine.expandUseCamera)
+                                .toggleStyle(.checkbox).font(.system(size: 10)).disabled(photoEngine.isScanning)
+                        }
                     }
                 }
-                Divider().frame(height: 20)
-                HStack(spacing: 8) {
-                    sortButton(label: "Copies", criteria: .count)
-                    sortButton(label: "Size", criteria: .size)
-                    sortButton(label: "Match Ratio", criteria: .matchRatio)
+                if mode != .photos {
+                    Divider().frame(height: 20)
+                    HStack(spacing: 8) {
+                        sortButton(label: "Copies", criteria: .count)
+                        sortButton(label: "Size", criteria: .size)
+                        sortButton(label: "Match Ratio", criteria: .matchRatio)
+                    }
                 }
                 
                 Spacer()
@@ -409,20 +444,7 @@ struct ContentView: View {
 
             // Duplicates List
             if mode == .photos {
-                Spacer()
-                VStack(spacing: 12) {
-                    Image(systemName: "photo.on.rectangle.angled")
-                        .font(.system(size: 48)).foregroundColor(.gray.opacity(0.25))
-                    Text("Duplicate Photos").font(.title3).fontWeight(.semibold)
-                    Text("Find visually similar photos (crops, re-exports, different sizes)\nand keep the best copy by resolution, size, or date.")
-                        .font(.caption).foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                    Text("Coming soon")
-                        .font(.system(size: 10, weight: .bold)).foregroundColor(.indigo)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(Color.indigo.opacity(0.1)).cornerRadius(5)
-                }
-                Spacer()
+                PhotosModeView(engine: photoEngine, hasFolders: !sourceFolders.isEmpty, selectedPhotoID: $selectedPhotoID)
             } else if !scanner.duplicateGroups.isEmpty || !scanner.folderDuplicateGroups.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
@@ -474,7 +496,9 @@ struct ContentView: View {
             
             // Hidden Button for Keyboard Shortcut (Space)
             Button("") {
-                if let file = selectedFile {
+                if mode == .photos {
+                    if let p = selectedPhoto { QuickLookManager.shared.togglePreview(url: URL(fileURLWithPath: p.fullPath)) }
+                } else if let file = selectedFile {
                     QuickLookManager.shared.togglePreview(url: URL(fileURLWithPath: file.fullPath))
                 } else if let id = selectedFolderGroupID,
                           let fg = scanner.folderDuplicateGroups.first(where: { $0.id == id }) {
@@ -485,12 +509,20 @@ struct ContentView: View {
             .opacity(0)
             .frame(width: 0, height: 0)
 
-            Button("") { navigateFolderGroup(by: -1) }
+            Button("") { if mode == .photos { navigatePhoto(by: -1) } else { navigateFolderGroup(by: -1) } }
                 .keyboardShortcut(.upArrow, modifiers: [])
                 .opacity(0).frame(width: 0, height: 0)
 
-            Button("") { navigateFolderGroup(by: 1) }
+            Button("") { if mode == .photos { navigatePhoto(by: 1) } else { navigateFolderGroup(by: 1) } }
                 .keyboardShortcut(.downArrow, modifiers: [])
+                .opacity(0).frame(width: 0, height: 0)
+
+            Button("") { if mode == .photos { navigatePhoto(by: -1) } }
+                .keyboardShortcut(.leftArrow, modifiers: [])
+                .opacity(0).frame(width: 0, height: 0)
+
+            Button("") { if mode == .photos { navigatePhoto(by: 1) } }
+                .keyboardShortcut(.rightArrow, modifiers: [])
                 .opacity(0).frame(width: 0, height: 0)
 
             // Status Bar
@@ -646,6 +678,27 @@ struct ContentView: View {
         selectedFolderGroupID = nextGroup.id
         // If the preview is open, update it to the new selection
         if previewFolderGroup != nil { previewFolderGroup = nextGroup }
+    }
+
+    // Flattened photo order across all groups, skipping already-deleted ones
+    private var photoOrder: [PhotoInfo] {
+        photoEngine.groups.flatMap { $0.photos.filter { !photoEngine.deletedPaths.contains($0.fullPath) } }
+    }
+    private var selectedPhoto: PhotoInfo? {
+        photoOrder.first { $0.id == selectedPhotoID }
+    }
+
+    private func navigatePhoto(by delta: Int) {
+        let order = photoOrder
+        guard !order.isEmpty else { return }
+        let currentIndex = order.firstIndex { $0.id == selectedPhotoID } ?? -1
+        let nextIndex = min(max(currentIndex + delta, 0), order.count - 1)
+        let next = order[nextIndex]
+        selectedPhotoID = next.id
+        // If Quick Look is already open, flip it to the newly selected photo
+        if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared()?.isVisible == true {
+            QuickLookManager.shared.showPreview(url: URL(fileURLWithPath: next.fullPath))
+        }
     }
 
     private var selectedRootPaths: [String] { sourceFolders.map { $0.path } }
@@ -894,6 +947,12 @@ struct ContentView: View {
     }
 
     private func startScanning() {
+        if mode == .photos {
+            if photoEngine.isScanning { photoEngine.stop(); return }
+            guard !sourceFolders.isEmpty else { return }
+            photoEngine.startScan(sourceFolders)
+            return
+        }
         if scanner.isScanning { scanner.stopScan(); return }
         guard !sourceFolders.isEmpty else { return }
         scanner.startScan(sourceURLs: sourceFolders)

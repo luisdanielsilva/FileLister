@@ -738,6 +738,34 @@ class FileScanner: ObservableObject {
         }
     }
 
+    // Logs duplicate-file deletions (Files mode) for recovery, reusing the merge log format.
+    private func writeFileCleanupLog(_ batch: [(kept: DuplicateFileInfo?, removed: [DuplicateFileInfo])]) {
+        let clusters: [MergeLogCluster] = batch.compactMap { item in
+            guard !item.removed.isEmpty else { return nil }
+            var entries: [MergeLogEntry] = []
+            if let k = item.kept {
+                entries.append(MergeLogEntry(
+                    action: "KEPT", fileName: k.name, sourcePath: k.fullPath, sourceFolder: k.path,
+                    destinationPath: k.fullPath, destinationFolder: k.path, sizeBytes: k.sizeBytes,
+                    sha256: "", note: "kept original"))
+            }
+            for r in item.removed {
+                entries.append(MergeLogEntry(
+                    action: "TRASHED", fileName: r.name, sourcePath: r.fullPath, sourceFolder: r.path,
+                    destinationPath: "Trash", destinationFolder: "Trash", sizeBytes: r.sizeBytes,
+                    sha256: "", note: "duplicate of kept · recoverable from Trash"))
+            }
+            let keepPath = item.kept?.fullPath ?? ""
+            return MergeLogCluster(keepFolder: keepPath, otherFolders: [],
+                                   resultName: item.kept?.name ?? "—", resultPath: keepPath, entries: entries)
+        }
+        guard !clusters.isEmpty, let dir = defaultLogDirectory() else { return }
+        let report = MergeLogReport(timestamp: Date(), appVersion: MergeLogWriter.appVersion,
+                                    mode: "Duplicate file cleanup", renameKeptFolder: false, clusters: clusters)
+        let url = MergeLogWriter.write(report, to: dir)
+        DispatchQueue.main.async { self.lastLogURL = url }
+    }
+
     func recycleFile(atPath fullPath: String) {
         let fileURL = URL(fileURLWithPath: fullPath)
 
@@ -748,6 +776,8 @@ class FileScanner: ObservableObject {
             return
         }
 
+        let keptRef = group.files.first { $0.fullPath != fullPath && !deletedPaths.contains($0.fullPath) }
+
         // Symlinks: identical by definition (same target) — skip binary check
         if fileInfo.isSymlink || group.isSymlinkGroup {
             NSWorkspace.shared.recycle([fileURL]) { (_, error) in
@@ -757,6 +787,7 @@ class FileScanner: ObservableObject {
                         self.deletedPaths.insert(fullPath)
                         self.totalRecovered += Int64(group.sizeBytes)
                         self.status = "Symlink moved to Trash."
+                        self.writeFileCleanupLog([(keptRef, [fileInfo])])
                     }
                 }
             }
@@ -788,6 +819,7 @@ class FileScanner: ObservableObject {
                             self.deletedPaths.insert(fullPath)
                             self.totalRecovered += Int64(group.sizeBytes)
                             self.status = "Security Verified! Moved to Trash."
+                            self.writeFileCleanupLog([(referenceFile, [fileInfo])])
                         }
                     }
                 }
@@ -803,15 +835,18 @@ class FileScanner: ObservableObject {
             var toRecycle: [URL] = []
             var totalSavingsInSession: Int64 = 0
             var skippedCount = 0
-            
+            var logBatch: [(kept: DuplicateFileInfo?, removed: [DuplicateFileInfo])] = []
+
             for group in self.duplicateGroups {
                 let activeFiles = group.files.filter { !self.deletedPaths.contains($0.fullPath) }
+                var groupRemoved: [DuplicateFileInfo] = []
 
                 if activeFiles.count > 1 {
                     if group.isSymlinkGroup {
                         // Symlinks: identical by target — skip binary check, keep the first
                         for i in 1..<activeFiles.count {
                             toRecycle.append(URL(fileURLWithPath: activeFiles[i].fullPath))
+                            groupRemoved.append(activeFiles[i])
                             totalSavingsInSession += Int64(group.sizeBytes)
                         }
                     } else {
@@ -820,6 +855,7 @@ class FileScanner: ObservableObject {
                             let fileURL = URL(fileURLWithPath: activeFiles[i].fullPath)
                             if self.isContentIdentical(url1: fileURL, url2: referenceURL) {
                                 toRecycle.append(fileURL)
+                                groupRemoved.append(activeFiles[i])
                                 totalSavingsInSession += Int64(group.sizeBytes)
                             } else {
                                 skippedCount += 1
@@ -827,6 +863,7 @@ class FileScanner: ObservableObject {
                         }
                     }
                 }
+                if !groupRemoved.isEmpty { logBatch.append((activeFiles.first, groupRemoved)) }
             }
             
             if toRecycle.isEmpty {
@@ -849,6 +886,7 @@ class FileScanner: ObservableObject {
                         self.totalRecovered += totalSavingsInSession
                         let skipMsg = skippedCount > 0 ? " (\(skippedCount) files skipped for safety)" : ""
                         self.status = "Security Verified! \(count) files moved to Trash\(skipMsg)."
+                        self.writeFileCleanupLog(logBatch)
                     }
                 }
             }

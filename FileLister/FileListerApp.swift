@@ -72,5 +72,9 @@ struct FileListerApp: App {
             HelpView()
         }
         .defaultSize(width: 820, height: 600)
+
+        Settings {
+            PhotoSettingsView()
+        }
     }
 }

@@ -58,6 +58,12 @@ enum MergeLogWriter {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
     }()
 
+    // The app's default logs folder (sandbox container Documents/FileLister Logs).
+    static func defaultAppLogDirectory() -> URL? {
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return nil }
+        return docs.appendingPathComponent("FileLister Logs", isDirectory: true)
+    }
+
     /// Writes the report as both .json and .html into `directory`.
     /// Returns the HTML URL on success (for revealing in Finder).
     @discardableResult
