@@ -21,6 +21,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 struct FileListerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var licenseManager = LicenseManager.shared
+    @StateObject private var history = OperationHistory.shared
     @State private var showingLicenseSheet = false
     @Environment(\.openWindow) private var openWindow
 
@@ -58,6 +59,14 @@ struct FileListerApp: App {
                     showingLicenseSheet = true
                 }
                 .keyboardShortcut("l", modifiers: .command)
+
+                Divider()
+
+                Button(history.canUndo ? "Undo \(history.lastTitle)" : "Undo Last Operation") {
+                    NotificationCenter.default.post(name: NSNotification.Name("undoLastOperation"), object: nil)
+                }
+                .keyboardShortcut("z", modifiers: .command)
+                .disabled(!history.canUndo)
             }
 
             CommandGroup(replacing: .help) {

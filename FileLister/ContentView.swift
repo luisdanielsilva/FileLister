@@ -651,8 +651,24 @@ struct ContentView: View {
         } message: {
             Text("You have reached the trial limit or are attempting a premium action. Please register to unlock unlimited access.")
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("undoLastOperation"))) { _ in
+            performUndo()
+        }
     }
-    
+
+    private func performUndo() {
+        guard let result = OperationHistory.shared.undoLast() else {
+            scanner.status = "Nothing to undo."
+            photoEngine.status = "Nothing to undo."
+            return
+        }
+        let restored = Set(result.restoredOriginals)
+        scanner.deletedPaths.subtract(restored)
+        photoEngine.deletedPaths.subtract(restored)
+        scanner.status = result.status
+        photoEngine.status = result.status
+    }
+
     private func sortButton(label: String, criteria: SortCriteria) -> some View {
         Button(action: { scanner.toggleSort(criteria: criteria) }) {
             HStack(spacing: 4) {

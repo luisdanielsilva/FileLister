@@ -306,12 +306,13 @@ class PhotoEngine: ObservableObject {
     func recycle(_ photo: PhotoInfo) {
         let keeper = groups.first { $0.photos.contains(photo) }?.keeper
         let url = URL(fileURLWithPath: photo.fullPath)
-        NSWorkspace.shared.recycle([url]) { _, error in
+        NSWorkspace.shared.recycle([url]) { newURLs, error in
             DispatchQueue.main.async {
                 if error == nil {
                     self.deletedPaths.insert(photo.fullPath)
                     self.status = "Moved \(photo.name) to Trash."
                     self.writePhotoLog([(keeper, [photo])])
+                    self.pushUndo(title: "Delete photo \(photo.name)", trashedOriginals: [url], newURLs: newURLs)
                 } else {
                     self.status = "Couldn't delete \(photo.name)."
                 }
@@ -324,17 +325,26 @@ class PhotoEngine: ObservableObject {
         guard !targets.isEmpty else { return }
         let keeper = group.keeper
         let urls = targets.map { URL(fileURLWithPath: $0.fullPath) }
-        NSWorkspace.shared.recycle(urls) { _, error in
+        NSWorkspace.shared.recycle(urls) { newURLs, error in
             DispatchQueue.main.async {
                 if error == nil {
                     for t in targets { self.deletedPaths.insert(t.fullPath) }
                     self.status = "Moved \(targets.count) photo(s) to Trash."
                     self.writePhotoLog([(keeper, targets)])
+                    self.pushUndo(title: "Delete \(targets.count) similar photo(s)", trashedOriginals: urls, newURLs: newURLs)
                 } else {
                     self.status = "Some photos couldn't be deleted."
                 }
             }
         }
+    }
+
+    private func pushUndo(title: String, trashedOriginals: [URL], newURLs: [URL: URL]?) {
+        let pairs: [(trashURL: URL, original: URL)] = trashedOriginals.compactMap { o in
+            guard let t = newURLs?[o] else { return nil }
+            return (t, o)
+        }
+        OperationHistory.shared.push(UndoableOp(title: title, trashed: pairs))
     }
 
     // Global "delete all non-keepers" — one Trash op + one log across all groups.
@@ -349,12 +359,13 @@ class PhotoEngine: ObservableObject {
             }
         }
         guard !urls.isEmpty else { return }
-        NSWorkspace.shared.recycle(urls) { _, error in
+        NSWorkspace.shared.recycle(urls) { newURLs, error in
             DispatchQueue.main.async {
                 if error == nil {
                     for item in batch { for t in item.deleted { self.deletedPaths.insert(t.fullPath) } }
                     self.status = "Moved \(urls.count) photo(s) to Trash."
                     self.writePhotoLog(batch)
+                    self.pushUndo(title: "Delete \(urls.count) non-keeper photo(s)", trashedOriginals: urls, newURLs: newURLs)
                 } else {
                     self.status = "Some photos couldn't be deleted."
                 }
@@ -373,6 +384,7 @@ class PhotoEngine: ObservableObject {
             let fm = FileManager.default
             var copied = 0, errors = 0
             var entries: [MergeLogEntry] = []
+            var createdURLs: [URL] = []
             for k in keepers {
                 let rel = self.relativeDestination(for: k.fullPath)
                 var dest = destination.appendingPathComponent(rel)
@@ -386,7 +398,7 @@ class PhotoEngine: ObservableObject {
                     suffix += 1
                 }
                 let ok = (try? fm.copyItem(at: URL(fileURLWithPath: k.fullPath), to: dest)) != nil
-                if ok { copied += 1 } else { errors += 1 }
+                if ok { copied += 1; createdURLs.append(dest) } else { errors += 1 }
                 entries.append(MergeLogEntry(
                     action: ok ? "COPIED" : "ERROR", fileName: k.name, sourcePath: k.fullPath, sourceFolder: k.path,
                     destinationPath: ok ? dest.path : "", destinationFolder: ok ? dest.deletingLastPathComponent().path : "",
@@ -405,6 +417,9 @@ class PhotoEngine: ObservableObject {
                 self.lastLogURL = logURL
                 let errMsg = errors > 0 ? " (\(errors) failed)" : ""
                 self.status = "Copied \(copied) keeper(s) to \"\(destination.lastPathComponent)\"\(errMsg). Originals untouched."
+                if !createdURLs.isEmpty {
+                    OperationHistory.shared.push(UndoableOp(title: "Copy \(copied) keeper(s) to \(destination.lastPathComponent)", created: createdURLs))
+                }
             }
         }
     }

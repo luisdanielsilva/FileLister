@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 // MARK: - Where merge logs are written
 
@@ -88,6 +89,10 @@ enum MergeLogWriter {
         let htmlURL = directory.appendingPathComponent("\(base).html")
         let html = renderHTML(report)
         try? html.data(using: .utf8)?.write(to: htmlURL)
+
+        // PDF (rendered offline via AppKit print-to-PDF — no WebKit/network)
+        LogPDFRenderer.render(report, to: directory.appendingPathComponent("\(base).pdf"))
+
         return htmlURL
     }
 
@@ -190,6 +195,92 @@ enum MergeLogWriter {
          .replacingOccurrences(of: "<", with: "&lt;")
          .replacingOccurrences(of: ">", with: "&gt;")
          .replacingOccurrences(of: "\"", with: "&quot;")
+    }
+
+    private static func byteString(_ bytes: Int) -> String {
+        let kb = Double(bytes) / 1024, mb = kb / 1024, gb = mb / 1024
+        if gb >= 1 { return String(format: "%.2f GB", gb) }
+        if mb >= 1 { return String(format: "%.2f MB", mb) }
+        if kb >= 1 { return String(format: "%.1f KB", kb) }
+        return "\(bytes) B"
+    }
+}
+
+// Renders a log report to a paginated PDF using AppKit print-to-PDF.
+// Fully offline (no WebKit), sandbox-safe. Runs on the main thread.
+enum LogPDFRenderer {
+    static func render(_ report: MergeLogReport, to url: URL) {
+        DispatchQueue.main.async {
+            let pageWidth: CGFloat = 612, margin: CGFloat = 36   // US Letter, 0.5" margins
+            let textWidth = pageWidth - margin * 2
+
+            let textView = NSTextView(frame: CGRect(x: 0, y: 0, width: textWidth, height: 100))
+            textView.drawsBackground = true
+            textView.backgroundColor = .white
+            textView.isVerticallyResizable = true
+            textView.isHorizontallyResizable = false
+            textView.textContainer?.containerSize = CGSize(width: textWidth, height: .greatestFiniteMagnitude)
+            textView.textContainer?.widthTracksTextView = true
+            textView.textStorage?.setAttributedString(attributedReport(report))
+            if let tc = textView.textContainer, let lm = textView.layoutManager {
+                lm.ensureLayout(for: tc)
+                let used = lm.usedRect(for: tc)
+                textView.frame = CGRect(x: 0, y: 0, width: textWidth, height: ceil(used.height) + 8)
+            }
+
+            let info = NSPrintInfo()
+            info.paperSize = NSSize(width: pageWidth, height: 792)
+            info.topMargin = margin; info.bottomMargin = margin
+            info.leftMargin = margin; info.rightMargin = margin
+            info.horizontalPagination = .fit
+            info.verticalPagination = .automatic
+            info.jobDisposition = .save
+            info.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = url
+
+            let op = NSPrintOperation(view: textView, printInfo: info)
+            op.showsPrintPanel = false
+            op.showsProgressPanel = false
+            op.run()
+        }
+    }
+
+    private static func attributedReport(_ report: MergeLogReport) -> NSAttributedString {
+        let s = NSMutableAttributedString()
+        func add(_ text: String, font: NSFont, color: NSColor = .black, after: CGFloat = 2) {
+            let p = NSMutableParagraphStyle(); p.paragraphSpacing = after; p.lineBreakMode = .byCharWrapping
+            s.append(NSAttributedString(string: text + "\n",
+                attributes: [.font: font, .foregroundColor: color, .paragraphStyle: p]))
+        }
+        let mono9 = NSFont.monospacedSystemFont(ofSize: 9, weight: .regular)
+        let df = DateFormatter(); df.dateStyle = .long; df.timeStyle = .medium
+
+        add("FileLister — Operation Log", font: .boldSystemFont(ofSize: 18))
+        add("\(df.string(from: report.timestamp))  ·  \(report.mode)  ·  v\(report.appVersion)",
+            font: .systemFont(ofSize: 10), color: .darkGray, after: 10)
+        add("Summary: \(report.clusters.count) group(s) · \(report.totalFilesMoved) moved/copied · \(report.totalFilesRemoved) removed · \(byteString(report.totalBytesRemoved)) reclaimed · \(report.errorCount) error(s)",
+            font: .systemFont(ofSize: 11), after: 14)
+
+        for c in report.clusters {
+            add(c.resultName, font: .boldSystemFont(ofSize: 13), after: 1)
+            add("keep: \(c.keepFolder)", font: .systemFont(ofSize: 9), color: .gray)
+            if !c.otherFolders.isEmpty {
+                add("others: \(c.otherFolders.joined(separator: ", "))", font: .systemFont(ofSize: 9), color: .gray)
+            }
+            for e in c.entries {
+                let color: NSColor
+                if e.action.hasPrefix("MOVED") { color = .systemBlue }
+                else if e.action.hasPrefix("COPIED") || e.action == "FOLDER_COPIED" { color = .systemGreen }
+                else if e.action == "TRASHED" || e.action == "FOLDER_TRASHED" { color = .systemRed }
+                else if e.action == "ERROR" { color = .systemOrange }
+                else { color = .darkGray }
+                add("  [\(e.action)] \(e.fileName)  ·  \(byteString(e.sizeBytes))", font: mono9, color: color, after: 0)
+                add("      from: \(e.sourcePath)", font: mono9, color: .gray, after: 0)
+                if !e.destinationPath.isEmpty { add("      to:   \(e.destinationPath)", font: mono9, color: .gray, after: 0) }
+                if !e.sha256.isEmpty { add("      \(e.sha256)", font: mono9, color: .lightGray, after: 0) }
+            }
+            add("", font: .systemFont(ofSize: 6), after: 8)
+        }
+        return s
     }
 
     private static func byteString(_ bytes: Int) -> String {

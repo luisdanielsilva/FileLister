@@ -738,6 +738,14 @@ class FileScanner: ObservableObject {
         }
     }
 
+    private func pushTrashUndo(title: String, originals: [URL], newURLs: [URL: URL]?) {
+        let pairs: [(trashURL: URL, original: URL)] = originals.compactMap { o in
+            guard let t = newURLs?[o] else { return nil }
+            return (trashURL: t, original: o)
+        }
+        OperationHistory.shared.push(UndoableOp(title: title, trashed: pairs))
+    }
+
     // Logs duplicate-file deletions (Files mode) for recovery, reusing the merge log format.
     private func writeFileCleanupLog(_ batch: [(kept: DuplicateFileInfo?, removed: [DuplicateFileInfo])]) {
         let clusters: [MergeLogCluster] = batch.compactMap { item in
@@ -780,7 +788,7 @@ class FileScanner: ObservableObject {
 
         // Symlinks: identical by definition (same target) — skip binary check
         if fileInfo.isSymlink || group.isSymlinkGroup {
-            NSWorkspace.shared.recycle([fileURL]) { (_, error) in
+            NSWorkspace.shared.recycle([fileURL]) { (newURLs, error) in
                 DispatchQueue.main.async {
                     if let error = error { self.status = "Error: \(error.localizedDescription)" }
                     else {
@@ -788,6 +796,7 @@ class FileScanner: ObservableObject {
                         self.totalRecovered += Int64(group.sizeBytes)
                         self.status = "Symlink moved to Trash."
                         self.writeFileCleanupLog([(keptRef, [fileInfo])])
+                        self.pushTrashUndo(title: "Delete \(fileInfo.name)", originals: [fileURL], newURLs: newURLs)
                     }
                 }
             }
@@ -812,7 +821,7 @@ class FileScanner: ObservableObject {
                     return
                 }
 
-                NSWorkspace.shared.recycle([fileURL]) { (_, error) in
+                NSWorkspace.shared.recycle([fileURL]) { (newURLs, error) in
                     DispatchQueue.main.async {
                         if let error = error { self.status = "Error: \(error.localizedDescription)" }
                         else {
@@ -820,6 +829,7 @@ class FileScanner: ObservableObject {
                             self.totalRecovered += Int64(group.sizeBytes)
                             self.status = "Security Verified! Moved to Trash."
                             self.writeFileCleanupLog([(referenceFile, [fileInfo])])
+                            self.pushTrashUndo(title: "Delete \(fileInfo.name)", originals: [fileURL], newURLs: newURLs)
                         }
                     }
                 }
@@ -887,6 +897,7 @@ class FileScanner: ObservableObject {
                         let skipMsg = skippedCount > 0 ? " (\(skippedCount) files skipped for safety)" : ""
                         self.status = "Security Verified! \(count) files moved to Trash\(skipMsg)."
                         self.writeFileCleanupLog(logBatch)
+                        self.pushTrashUndo(title: "Clean \(count) duplicate file(s)", originals: toRecycle, newURLs: newURLs)
                     }
                 }
             }
@@ -1125,6 +1136,9 @@ class FileScanner: ObservableObject {
                 self.status = failed
                     ? "Safe merge failed for \"\(dest.lastPathComponent)\"."
                     : "Merged copy created → \"\(dest.lastPathComponent)\". Originals untouched\(logURL != nil ? " · log saved" : "")."
+                if !failed {
+                    OperationHistory.shared.push(UndoableOp(title: "Copy merge → \(dest.lastPathComponent)", created: [dest]))
+                }
             }
         }
     }
@@ -1138,6 +1152,7 @@ class FileScanner: ObservableObject {
             let fileManager = FileManager.default
             var clusters: [MergeLogCluster] = []
             var errorCount = 0
+            var createdDests: [URL] = []
             for group in groups {
                 let name = self.computeMergedFolderName(folderA: group.folderA, folderB: group.folderB)
                 var dest = parent.appendingPathComponent(name)
@@ -1148,6 +1163,7 @@ class FileScanner: ObservableObject {
                 }
                 let cluster = self.copyMergedFolder(group, to: dest)
                 if cluster.entries.contains(where: { $0.action == "ERROR" }) { errorCount += 1 }
+                else { createdDests.append(dest) }
                 clusters.append(cluster)
             }
             let report = MergeLogReport(timestamp: Date(), appVersion: MergeLogWriter.appVersion,
@@ -1159,6 +1175,9 @@ class FileScanner: ObservableObject {
                 self.lastLogURL = logURL
                 let errMsg = errorCount > 0 ? " (\(errorCount) failed)" : ""
                 self.status = "Created \(clusters.count - errorCount) merged copy(ies) in \"\(parent.lastPathComponent)\"\(errMsg). Originals untouched\(logURL != nil ? " · log saved" : "")."
+                if !createdDests.isEmpty {
+                    OperationHistory.shared.push(UndoableOp(title: "Copy \(createdDests.count) merged folder(s)", created: createdDests))
+                }
             }
         }
     }
