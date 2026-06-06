@@ -67,6 +67,11 @@ struct FileListerApp: App {
                 }
                 .keyboardShortcut("z", modifiers: .command)
                 .disabled(!history.canUndo)
+
+                Button("Operation History…") {
+                    openWindow(id: "logs")
+                }
+                .keyboardShortcut("y", modifiers: .command)
             }
 
             CommandGroup(replacing: .help) {
@@ -81,6 +86,11 @@ struct FileListerApp: App {
             HelpView()
         }
         .defaultSize(width: 820, height: 600)
+
+        Window("Operation History", id: "logs") {
+            LogsHistoryView()
+        }
+        .defaultSize(width: 900, height: 620)
 
         Settings {
             PhotoSettingsView()
