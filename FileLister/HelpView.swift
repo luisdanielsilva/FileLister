@@ -2,14 +2,20 @@ import SwiftUI
 
 enum HelpSection: String, CaseIterable, Identifiable {
     case welcome          = "Welcome to FileLister"
+    case whatsNew         = "Modes & What's New"
     case atAGlance        = "FileLister at a Glance"
     case folderDuplicates = "Folder Duplicates & Merging"
+    case photos           = "Duplicate Photos"
+    case oneDrive         = "OneDrive (Cloud)"
     var id: String { rawValue }
     var icon: String {
         switch self {
         case .welcome:          return "star.circle.fill"
+        case .whatsNew:         return "sparkles"
         case .atAGlance:        return "rectangle.on.rectangle"
         case .folderDuplicates: return "folder.badge.questionmark"
+        case .photos:           return "photo.on.rectangle.angled"
+        case .oneDrive:         return "cloud"
         }
     }
 }
@@ -30,8 +36,11 @@ struct HelpView: View {
                 Group {
                     switch selection {
                     case .welcome:          WelcomeSection()
+                    case .whatsNew:         WhatsNewSection()
                     case .atAGlance:        AtAGlanceSection()
                     case .folderDuplicates: FolderDuplicatesSection()
+                    case .photos:           PhotosHelpSection()
+                    case .oneDrive:         OneDriveHelpSection()
                     case nil:               WelcomeSection()
                     }
                 }
@@ -354,6 +363,128 @@ private struct FolderDuplicatesSection: View {
                 featureRow(icon: "pencil", color: .orange,
                            title: "Rename kept folder",
                            body: "When on, the kept folder is renamed with a merged tag. When off, it keeps its original name and simply gains the merged files. (Copy-to-new-folder always names its new folder with the merged tag.)")
+            }
+        }
+    }
+}
+
+// ── Modes & What's New ────────────────────────────────────────────────────────
+
+private struct WhatsNewSection: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Modes & What's New").font(.largeTitle).fontWeight(.bold)
+                Text("FileLister now works in three modes, on local folders or OneDrive.")
+                    .font(.subheadline).foregroundColor(.secondary)
+            }
+            Divider()
+
+            helpGroup(title: "Three modes") {
+                featureRow(icon: "doc.on.doc", color: .blue, title: "Files",
+                           body: "Find byte-identical duplicate files and recycle the extras, keeping one copy safe.")
+                featureRow(icon: "folder.badge.questionmark", color: .indigo, title: "Folders",
+                           body: "Find duplicate folders (clustered), preview the merge, and combine them — in place or as a non-destructive copy to a new folder.")
+                featureRow(icon: "photo.on.rectangle.angled", color: .orange, title: "Photos",
+                           body: "Find visually similar photos (not just identical), auto-pick the best copy, and clean up or export the keepers.")
+            }
+            Divider()
+
+            helpGroup(title: "Local or OneDrive") {
+                Text("A source switch at the top lets you scan your local folders or your OneDrive account. Choose multiple local folders (Across-all or Within-each), or connect OneDrive and pick which cloud folders to scan.")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Divider()
+
+            helpGroup(title: "Recent additions") {
+                featureRow(icon: "rectangle.stack.badge.play", color: .indigo, title: "Review One-by-One",
+                           body: "Step through each folder cluster and approve, skip, or cancel before anything is merged.")
+                featureRow(icon: "doc.on.doc", color: .green, title: "Safe copy & keeper export",
+                           body: "Merge into a new folder, or copy photo keepers elsewhere — originals untouched, structure preserved.")
+                featureRow(icon: "doc.text.magnifyingglass", color: .purple, title: "Operation logs (JSON · HTML · PDF)",
+                           body: "Every delete, merge, copy and cloud action writes a detailed report with paths, sizes and hashes.")
+                featureRow(icon: "arrow.uturn.backward", color: .blue, title: "Undo & Operation History",
+                           body: "Undo the last operation (⌘Z) restores from Trash. Operation History (⌘Y) browses every past report.")
+                featureRow(icon: "cloud", color: .blue, title: "OneDrive",
+                           body: "Connect your Microsoft account and find/clean duplicate files in chosen OneDrive folders.")
+            }
+        }
+    }
+}
+
+// ── Duplicate Photos ──────────────────────────────────────────────────────────
+
+private struct PhotosHelpSection: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Duplicate Photos").font(.largeTitle).fontWeight(.bold)
+                Text("Find photos that look the same even when the files differ.")
+                    .font(.subheadline).foregroundColor(.secondary)
+            }
+            Divider()
+            helpGroup(title: "How it finds similar photos") {
+                Text("Exact (byte-identical) duplicates are found in Files mode. Photos mode goes further: it compares the actual image content using perceptual hashing (a fast dHash pre-filter, then a pHash check), so it catches re-exports, resizes, recompression, crops and format conversions that byte comparison misses.")
+                    .fixedSize(horizontal: false, vertical: true)
+                calloutRow(icon: "slider.horizontal.3", color: .teal,
+                           text: "The Similarity slider controls how alike photos must be to group. Optional EXIF corroboration and metadata expansion (same time / GPS / camera) refine the groups.")
+            }
+            Divider()
+            helpGroup(title: "Best copy & cleanup") {
+                calloutRow(icon: "star.fill", color: .green,
+                           text: "Each group auto-picks a keeper using your priority (Settings ▸ Photos): resolution, file size, date, RAW, GPS. You can override which photo is kept.")
+                calloutRow(icon: "eye", color: .blue,
+                           text: "Select a photo and press Space for Quick Look; use ← → to move between photos.")
+                calloutRow(icon: "trash", color: .red,
+                           text: "Delete the non-keepers (with a confirmation showing the comparison and space saved), or copy the keepers to another folder, replicating their structure.")
+            }
+        }
+    }
+}
+
+// ── OneDrive ──────────────────────────────────────────────────────────────────
+
+private struct OneDriveHelpSection: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("OneDrive (Cloud)").font(.largeTitle).fontWeight(.bold)
+                Text("Find and clean duplicate files directly in your OneDrive.")
+                    .font(.subheadline).foregroundColor(.secondary)
+            }
+            Divider()
+
+            helpGroup(title: "Connecting") {
+                Text("Switch the source toggle (top right) from Local to OneDrive, then click Connect OneDrive. You'll sign in with your Microsoft account in your default browser; FileLister never sees your password. Your sign-in is remembered securely in the macOS Keychain.")
+                    .fixedSize(horizontal: false, vertical: true)
+                calloutRow(icon: "network", color: .blue,
+                           text: "OneDrive is the only feature that uses the internet. All local scanning stays fully offline.")
+            }
+            Divider()
+
+            helpGroup(title: "Choosing folders") {
+                Text("After connecting, pick which OneDrive folders to scan. Browse your cloud folders, add one or more (or the entire drive), and remove them anytime — just like selecting local folders.")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Divider()
+
+            helpGroup(title: "Finding & cleaning duplicates (Files)") {
+                calloutRow(icon: "shield.checkerboard", color: .purple,
+                           text: "Files are matched by OneDrive's own content hash (quickXorHash) — no downloads needed to find duplicates.")
+                calloutRow(icon: "eye", color: .blue,
+                           text: "Select a file and press Space to preview it (the file is downloaded on demand, with a progress ring); ← → move between files.")
+                calloutRow(icon: "trash", color: .red,
+                           text: "Delete individual copies or all duplicates. Deleted files go to the OneDrive recycle bin (recoverable there). At least one copy per group is always kept.")
+                calloutRow(icon: "doc.text", color: .gray,
+                           text: "Cloud actions are logged like local ones (JSON / HTML / PDF).")
+            }
+            Divider()
+
+            helpGroup(title: "Scan limits & notes") {
+                calloutRow(icon: "gauge", color: .orange,
+                           text: "To keep the first scan fast, scanning is capped (Settings ▸ OneDrive — default 5000 files / 5 GB). Raise or remove the limit there.")
+                calloutRow(icon: "exclamationmark.triangle", color: .secondary,
+                           text: "Folders and Photos on OneDrive are coming in a later update. Cloud deletes can't be undone from the app (restore them from the OneDrive recycle bin).")
             }
         }
     }

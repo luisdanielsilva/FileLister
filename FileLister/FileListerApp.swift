@@ -93,7 +93,7 @@ struct FileListerApp: App {
         .defaultSize(width: 900, height: 620)
 
         Settings {
-            PhotoSettingsView()
+            SettingsView()
         }
     }
 }

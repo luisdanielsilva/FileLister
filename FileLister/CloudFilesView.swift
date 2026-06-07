@@ -1,8 +1,24 @@
 import SwiftUI
 
+// Small circular download-progress ring.
+struct ProgressRing: View {
+    let progress: Double   // 0…1
+    var body: some View {
+        ZStack {
+            Circle().stroke(Color.gray.opacity(0.25), lineWidth: 2)
+            Circle()
+                .trim(from: 0, to: max(0.02, min(1, progress)))
+                .stroke(Color.blue, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.linear(duration: 0.1), value: progress)
+        }
+    }
+}
+
 struct CloudFilesView: View {
     @ObservedObject var engine: OneDriveEngine
     @ObservedObject var auth: OneDriveAuth
+    @Binding var selectedCloudID: String?
 
     var body: some View {
         if engine.isScanning {
@@ -23,6 +39,7 @@ struct CloudFilesView: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
                     Text("OneDrive duplicates (\(engine.groups.count)):").font(.caption).fontWeight(.bold)
+                    Text("Space to preview · ← → to move").font(.system(size: 8, weight: .bold)).foregroundColor(.blue)
                     if engine.hitLimit {
                         Text("preview limit reached").font(.system(size: 8, weight: .bold)).foregroundColor(.orange)
                             .padding(.horizontal, 4).padding(.vertical, 1).background(Color.orange.opacity(0.12)).cornerRadius(3)
@@ -82,22 +99,41 @@ struct CloudFilesView: View {
             }
             ForEach(group.files, id: \.id) { file in
                 let isDeleted = engine.deletedIDs.contains(file.id)
+                let isSelected = selectedCloudID == file.id
                 HStack(spacing: 8) {
-                    Image(systemName: isDeleted ? "checkmark.circle.fill" : "cloud")
-                        .font(.system(size: 9)).foregroundColor(isDeleted ? .red : .blue.opacity(0.6))
+                    if engine.previewingID == file.id {
+                        ProgressRing(progress: engine.previewProgress).frame(width: 14, height: 14)
+                    } else {
+                        Image(systemName: isDeleted ? "checkmark.circle.fill" : "cloud")
+                            .font(.system(size: 9)).foregroundColor(isDeleted ? .red : .blue.opacity(0.6))
+                            .frame(width: 14, height: 14)
+                    }
                     Text(file.fullPath)
                         .font(.system(size: 10, design: .monospaced))
                         .strikethrough(isDeleted)
                         .foregroundColor(isDeleted ? .secondary : .primary)
                         .lineLimit(1).truncationMode(.middle)
                     Spacer()
-                    if let web = file.webURL, let url = URL(string: web), !isDeleted {
-                        Button(action: { NSWorkspace.shared.open(url) }) {
-                            Image(systemName: "arrow.up.forward.square").font(.system(size: 9)).foregroundColor(.gray)
-                        }.buttonStyle(.plain).help("Open in OneDrive")
+                    if !isDeleted {
+                        if let web = file.webURL, let url = URL(string: web) {
+                            Button(action: { NSWorkspace.shared.open(url) }) {
+                                Image(systemName: "arrow.up.forward.square").font(.system(size: 9)).foregroundColor(.gray)
+                            }.buttonStyle(.plain).help("Open in OneDrive")
+                        }
+                        Button(action: { engine.deleteFile(file, in: group, auth: auth) }) {
+                            Image(systemName: live.count > 1 ? "trash" : "lock.fill")
+                                .font(.system(size: 9)).foregroundColor(live.count > 1 ? .red : .green.opacity(0.5))
+                        }
+                        .buttonStyle(.plain).disabled(live.count <= 1)
+                        .help(live.count > 1 ? "Move this copy to the OneDrive recycle bin" : "Last copy — kept safe")
                     }
                 }
-                .padding(.leading, 12)
+                .padding(.vertical, 2).padding(.horizontal, 6)
+                .background(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
+                .cornerRadius(4)
+                .contentShape(Rectangle())
+                .onTapGesture { if !isDeleted { selectedCloudID = file.id } }
+                .padding(.leading, 6)
             }
         }
         .padding(6).background(live.count > 1 ? Color.orange.opacity(0.08) : Color.green.opacity(0.05)).cornerRadius(4)

@@ -135,6 +135,8 @@ struct ContentView: View {
     @EnvironmentObject var licenseManager: LicenseManager
     @State private var mode: AppMode = .files
     @State private var source: ScanSource = .local
+    @State private var selectedCloudFolders: [CloudFolder] = []
+    @State private var showingCloudPicker = false
 
     // True when the engine for the active source/mode is scanning
     private var activeScanning: Bool {
@@ -148,6 +150,7 @@ struct ContentView: View {
     // Selection state for Quick Look
     @State private var selectedFile: DuplicateFileInfo? = nil
     @State private var selectedPhotoID: UUID? = nil
+    @State private var selectedCloudID: String? = nil
     @State private var showingBatchDeleteConfirm = false
     @State private var showingRegisterAlert = false
     @State private var folderGroupToMerge: FolderDuplicateGroup? = nil
@@ -205,7 +208,7 @@ struct ContentView: View {
 
             // Top Bar
             HStack(spacing: 12) {
-                let searchDisabled = source == .oneDrive ? !oneDrive.isConnected : (sourceFolders.isEmpty && !activeScanning)
+                let searchDisabled = source == .oneDrive ? (!oneDrive.isConnected || (selectedCloudFolders.isEmpty && !oneDriveEngine.isScanning)) : (sourceFolders.isEmpty && !activeScanning)
                 Button(action: { startScanning() }) {
                     HStack {
                         Image(systemName: activeScanning ? "stop.circle.fill" : "magnifyingglass.circle.fill")
@@ -271,13 +274,33 @@ struct ContentView: View {
                         .help("Across all: find duplicates pooled across every folder.\nWithin each: find duplicates only inside each folder separately.")
                     }
                 } else {
-                    // OneDrive connection panel
+                    // OneDrive connection / folder panel
                     HStack(spacing: 8) {
                         Image(systemName: oneDrive.isConnected ? "cloud.fill" : "cloud").foregroundColor(oneDrive.isConnected ? .blue : .secondary)
                         if oneDrive.isConnected {
-                            Text("Connected as \(oneDrive.accountName)").font(.system(size: 11))
+                            if selectedCloudFolders.isEmpty {
+                                Text("\(oneDrive.accountName) — no folders selected").font(.system(size: 11)).foregroundColor(.secondary)
+                            } else {
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 6) {
+                                        ForEach(selectedCloudFolders) { f in
+                                            HStack(spacing: 4) {
+                                                Image(systemName: "cloud").font(.system(size: 9)).foregroundColor(.blue.opacity(0.7))
+                                                Text(f.name).font(.system(size: 10)).lineLimit(1).help(f.path)
+                                                Button(action: { selectedCloudFolders.removeAll { $0 == f } }) {
+                                                    Image(systemName: "xmark.circle.fill").font(.system(size: 9)).foregroundColor(.secondary)
+                                                }.buttonStyle(.plain).disabled(oneDriveEngine.isScanning)
+                                            }
+                                            .padding(.horizontal, 6).padding(.vertical, 3)
+                                            .background(Color.blue.opacity(0.08)).cornerRadius(4)
+                                        }
+                                    }
+                                }
+                            }
                             Spacer(minLength: 0)
-                            Button("Sign Out") { oneDrive.disconnect() }
+                            Button("Add Folder…") { showingCloudPicker = true }
+                                .buttonStyle(.bordered).controlSize(.small).disabled(oneDriveEngine.isScanning)
+                            Button("Sign Out") { oneDrive.disconnect(); selectedCloudFolders = [] }
                                 .buttonStyle(.bordered).controlSize(.small)
                         } else {
                             Text("Not connected").font(.system(size: 11)).foregroundColor(.secondary)
@@ -289,6 +312,16 @@ struct ContentView: View {
                     .padding(.horizontal, 10).frame(height: 32)
                     .background(Color(NSColor.controlBackgroundColor))
                     .cornerRadius(6).overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.2), lineWidth: 1))
+                    .onChange(of: oneDrive.isConnected) { connected in
+                        if connected && source == .oneDrive && selectedCloudFolders.isEmpty {
+                            showingCloudPicker = true
+                        }
+                    }
+                    .sheet(isPresented: $showingCloudPicker) {
+                        CloudFolderPickerSheet(engine: oneDriveEngine, auth: oneDrive,
+                                               selected: $selectedCloudFolders,
+                                               onClose: { showingCloudPicker = false })
+                    }
                 }
             }
             .padding().background(Color(NSColor.windowBackgroundColor))
@@ -491,8 +524,8 @@ struct ContentView: View {
 
             // Duplicates List
             if source == .oneDrive {
-                if oneDrive.isConnected && mode == .files {
-                    CloudFilesView(engine: oneDriveEngine, auth: oneDrive)
+                if oneDrive.isConnected && mode == .files && (!selectedCloudFolders.isEmpty || !oneDriveEngine.groups.isEmpty) {
+                    CloudFilesView(engine: oneDriveEngine, auth: oneDrive, selectedCloudID: $selectedCloudID)
                 } else {
                     Spacer()
                     VStack(spacing: 12) {
@@ -500,9 +533,15 @@ struct ContentView: View {
                         Text(oneDrive.isConnected ? "OneDrive — \(mode.rawValue)" : "OneDrive")
                             .font(.title3).fontWeight(.semibold)
                         Text(oneDrive.isConnected
-                             ? (mode == .files ? "Press Search to scan." : "Duplicate \(mode.rawValue.lowercased()) on OneDrive arrives in a later update.")
+                             ? (mode == .files
+                                ? "Add one or more OneDrive folders, then press Search."
+                                : "Duplicate \(mode.rawValue.lowercased()) on OneDrive arrives in a later update.")
                              : "Connect your OneDrive account to scan it for duplicates.")
                             .font(.caption).foregroundColor(.secondary).multilineTextAlignment(.center)
+                        if oneDrive.isConnected && mode == .files && selectedCloudFolders.isEmpty {
+                            Button("Add OneDrive Folder…") { showingCloudPicker = true }
+                                .controlSize(.small)
+                        }
                         if !oneDrive.status.isEmpty {
                             Text(oneDrive.status).font(.caption2).foregroundColor(.secondary)
                         }
@@ -562,7 +601,9 @@ struct ContentView: View {
             
             // Hidden Button for Keyboard Shortcut (Space)
             Button("") {
-                if mode == .photos {
+                if source == .oneDrive {
+                    if let f = selectedCloudFile { oneDriveEngine.preview(f, auth: oneDrive) }
+                } else if mode == .photos {
                     if let p = selectedPhoto { QuickLookManager.shared.togglePreview(url: URL(fileURLWithPath: p.fullPath)) }
                 } else if let file = selectedFile {
                     QuickLookManager.shared.togglePreview(url: URL(fileURLWithPath: file.fullPath))
@@ -575,19 +616,19 @@ struct ContentView: View {
             .opacity(0)
             .frame(width: 0, height: 0)
 
-            Button("") { if mode == .photos { navigatePhoto(by: -1) } else { navigateFolderGroup(by: -1) } }
+            Button("") { if source == .oneDrive { navigateCloud(by: -1) } else if mode == .photos { navigatePhoto(by: -1) } else { navigateFolderGroup(by: -1) } }
                 .keyboardShortcut(.upArrow, modifiers: [])
                 .opacity(0).frame(width: 0, height: 0)
 
-            Button("") { if mode == .photos { navigatePhoto(by: 1) } else { navigateFolderGroup(by: 1) } }
+            Button("") { if source == .oneDrive { navigateCloud(by: 1) } else if mode == .photos { navigatePhoto(by: 1) } else { navigateFolderGroup(by: 1) } }
                 .keyboardShortcut(.downArrow, modifiers: [])
                 .opacity(0).frame(width: 0, height: 0)
 
-            Button("") { if mode == .photos { navigatePhoto(by: -1) } }
+            Button("") { if source == .oneDrive { navigateCloud(by: -1) } else if mode == .photos { navigatePhoto(by: -1) } }
                 .keyboardShortcut(.leftArrow, modifiers: [])
                 .opacity(0).frame(width: 0, height: 0)
 
-            Button("") { if mode == .photos { navigatePhoto(by: 1) } }
+            Button("") { if source == .oneDrive { navigateCloud(by: 1) } else if mode == .photos { navigatePhoto(by: 1) } }
                 .keyboardShortcut(.rightArrow, modifiers: [])
                 .opacity(0).frame(width: 0, height: 0)
 
@@ -780,6 +821,25 @@ struct ContentView: View {
         // If Quick Look is already open, flip it to the newly selected photo
         if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared()?.isVisible == true {
             QuickLookManager.shared.showPreview(url: URL(fileURLWithPath: next.fullPath))
+        }
+    }
+
+    // Cloud (OneDrive) navigation — flattened over all groups, skipping deleted files
+    private var cloudOrder: [CloudFileInfo] {
+        oneDriveEngine.groups.flatMap { $0.files.filter { !oneDriveEngine.deletedIDs.contains($0.id) } }
+    }
+    private var selectedCloudFile: CloudFileInfo? { cloudOrder.first { $0.id == selectedCloudID } }
+
+    private func navigateCloud(by delta: Int) {
+        let order = cloudOrder
+        guard !order.isEmpty else { return }
+        let currentIndex = order.firstIndex { $0.id == selectedCloudID } ?? -1
+        let nextIndex = min(max(currentIndex + delta, 0), order.count - 1)
+        let next = order[nextIndex]
+        selectedCloudID = next.id
+        // If Quick Look is open, flip to the newly selected cloud file (downloads it)
+        if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared()?.isVisible == true {
+            oneDriveEngine.preview(next, auth: oneDrive)
         }
     }
 
@@ -1031,9 +1091,9 @@ struct ContentView: View {
     private func startScanning() {
         if source == .oneDrive {
             if oneDriveEngine.isScanning { oneDriveEngine.stop(); return }
-            guard oneDrive.isConnected else { return }
+            guard oneDrive.isConnected, !selectedCloudFolders.isEmpty else { return }
             if mode == .files {
-                oneDriveEngine.scan(auth: oneDrive)
+                oneDriveEngine.scan(auth: oneDrive, folders: selectedCloudFolders)
             } else {
                 oneDrive.status = "OneDrive \(mode.rawValue) scanning arrives in a later update."
             }
