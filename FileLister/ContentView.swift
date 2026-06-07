@@ -106,6 +106,13 @@ struct SelectionButton: View {
     }
 }
 
+enum ScanSource: String, CaseIterable, Identifiable {
+    case local = "Local"
+    case oneDrive = "OneDrive"
+    var id: String { rawValue }
+    var icon: String { self == .local ? "internaldrive" : "cloud" }
+}
+
 enum AppMode: String, CaseIterable, Identifiable {
     case files   = "Files"
     case folders = "Folders"
@@ -123,11 +130,17 @@ enum AppMode: String, CaseIterable, Identifiable {
 struct ContentView: View {
     @StateObject private var scanner = FileScanner()
     @StateObject private var photoEngine = PhotoEngine()
+    @StateObject private var oneDrive = OneDriveAuth()
+    @StateObject private var oneDriveEngine = OneDriveEngine()
     @EnvironmentObject var licenseManager: LicenseManager
     @State private var mode: AppMode = .files
+    @State private var source: ScanSource = .local
 
-    // True when the engine for the active mode is scanning
-    private var activeScanning: Bool { mode == .photos ? photoEngine.isScanning : scanner.isScanning }
+    // True when the engine for the active source/mode is scanning
+    private var activeScanning: Bool {
+        if source == .oneDrive { return oneDriveEngine.isScanning }
+        return mode == .photos ? photoEngine.isScanning : scanner.isScanning
+    }
     @State private var sourceFolders: [URL] = []
     @State private var collapsedRoots: Set<String> = []
     private let acrossKey = "__across_multiple__"
@@ -159,27 +172,40 @@ struct ContentView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Mode switcher
-            Picker("", selection: $mode) {
-                ForEach(AppMode.allCases) { m in
-                    Label(m.rawValue, systemImage: m.icon).tag(m)
+            // Mode switcher + source (Local / OneDrive)
+            HStack(spacing: 12) {
+                Picker("", selection: $mode) {
+                    ForEach(AppMode.allCases) { m in
+                        Label(m.rawValue, systemImage: m.icon).tag(m)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelStyle(.titleAndIcon)
+                .disabled(scanner.isScanning)
+                .onChange(of: mode) { newMode in
+                    scanner.detectFolderDuplicates = (newMode == .folders)
+                    scanner.duplicateGroups = []
+                    scanner.folderDuplicateGroups = []
+                    selectedFolderGroupID = nil
+                    selectedFile = nil
+                }
+
+                Picker("", selection: $source) {
+                    ForEach(ScanSource.allCases) { s in
+                        Label(s.rawValue, systemImage: s.icon).tag(s)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelStyle(.titleAndIcon)
+                .frame(width: 190)
+                .disabled(activeScanning)
+                .help("Scan local folders or your OneDrive (not combined yet).")
             }
-            .pickerStyle(.segmented)
-            .labelStyle(.titleAndIcon)
             .padding(.horizontal).padding(.top, 10)
-            .disabled(scanner.isScanning)
-            .onChange(of: mode) { newMode in
-                scanner.detectFolderDuplicates = (newMode == .folders)
-                // Each mode shows its own scan — clear stale results when switching
-                scanner.duplicateGroups = []
-                scanner.folderDuplicateGroups = []
-                selectedFolderGroupID = nil
-                selectedFile = nil
-            }
 
             // Top Bar
             HStack(spacing: 12) {
+                let searchDisabled = source == .oneDrive ? !oneDrive.isConnected : (sourceFolders.isEmpty && !activeScanning)
                 Button(action: { startScanning() }) {
                     HStack {
                         Image(systemName: activeScanning ? "stop.circle.fill" : "magnifyingglass.circle.fill")
@@ -187,61 +213,82 @@ struct ContentView: View {
                     }
                     .fontWeight(.semibold)
                     .frame(width: 180, height: 32)
-                    .background(sourceFolders.isEmpty && !activeScanning ? Color.gray.opacity(0.3) : Color.blue)
+                    .background(searchDisabled ? Color.gray.opacity(0.3) : Color.blue)
                     .foregroundColor(.white)
                     .cornerRadius(6)
                 }
-                .disabled(sourceFolders.isEmpty && !activeScanning)
+                .disabled(searchDisabled)
                 .buttonStyle(.plain)
 
-                // Selected folders list + add button
-                HStack(spacing: 8) {
-                    if sourceFolders.isEmpty {
-                        Text("No Folders Selected")
-                            .foregroundColor(.secondary)
-                            .font(.system(size: 11, design: .monospaced))
-                    } else {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 6) {
-                                ForEach(sourceFolders, id: \.self) { folder in
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "folder.fill").font(.system(size: 9)).foregroundColor(.blue.opacity(0.7))
-                                        Text(folder.lastPathComponent)
-                                            .font(.system(size: 10))
-                                            .lineLimit(1)
-                                            .help(folder.path)
-                                        Button(action: { sourceFolders.removeAll { $0 == folder } }) {
-                                            Image(systemName: "xmark.circle.fill")
-                                                .font(.system(size: 9)).foregroundColor(.secondary)
+                if source == .local {
+                    // Selected folders list + add button
+                    HStack(spacing: 8) {
+                        if sourceFolders.isEmpty {
+                            Text("No Folders Selected")
+                                .foregroundColor(.secondary)
+                                .font(.system(size: 11, design: .monospaced))
+                        } else {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(sourceFolders, id: \.self) { folder in
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "folder.fill").font(.system(size: 9)).foregroundColor(.blue.opacity(0.7))
+                                            Text(folder.lastPathComponent)
+                                                .font(.system(size: 10))
+                                                .lineLimit(1)
+                                                .help(folder.path)
+                                            Button(action: { sourceFolders.removeAll { $0 == folder } }) {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .font(.system(size: 9)).foregroundColor(.secondary)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .disabled(scanner.isScanning)
                                         }
-                                        .buttonStyle(.plain)
-                                        .disabled(scanner.isScanning)
+                                        .padding(.horizontal, 6).padding(.vertical, 3)
+                                        .background(Color.blue.opacity(0.08)).cornerRadius(4)
                                     }
-                                    .padding(.horizontal, 6).padding(.vertical, 3)
-                                    .background(Color.blue.opacity(0.08)).cornerRadius(4)
                                 }
                             }
                         }
+                        Spacer(minLength: 0)
+                        Button("Add Folder...") { selectSource() }
+                            .buttonStyle(.bordered).controlSize(.small)
+                            .disabled(scanner.isScanning)
                     }
-                    Spacer(minLength: 0)
-                    Button("Add Folder...") { selectSource() }
-                        .buttonStyle(.bordered).controlSize(.small)
-                        .disabled(scanner.isScanning)
-                }
-                .padding(.horizontal, 10).frame(height: 32)
-                .background(Color(NSColor.controlBackgroundColor))
-                .cornerRadius(6).overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.2), lineWidth: 1))
+                    .padding(.horizontal, 10).frame(height: 32)
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .cornerRadius(6).overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.2), lineWidth: 1))
 
-                // Scan scope — only relevant with 2+ folders
-                if sourceFolders.count >= 2 {
-                    Picker("", selection: $scanner.scanScope) {
-                        Text("Across all").tag(ScanScope.combined)
-                        Text("Within each").tag(ScanScope.perFolder)
+                    // Scan scope — only relevant with 2+ folders
+                    if sourceFolders.count >= 2 {
+                        Picker("", selection: $scanner.scanScope) {
+                            Text("Across all").tag(ScanScope.combined)
+                            Text("Within each").tag(ScanScope.perFolder)
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 180)
+                        .disabled(scanner.isScanning)
+                        .help("Across all: find duplicates pooled across every folder.\nWithin each: find duplicates only inside each folder separately.")
                     }
-                    .pickerStyle(.segmented)
-                    .frame(width: 180)
-                    .disabled(scanner.isScanning)
-                    .help("Across all: find duplicates pooled across every folder.\nWithin each: find duplicates only inside each folder separately.")
+                } else {
+                    // OneDrive connection panel
+                    HStack(spacing: 8) {
+                        Image(systemName: oneDrive.isConnected ? "cloud.fill" : "cloud").foregroundColor(oneDrive.isConnected ? .blue : .secondary)
+                        if oneDrive.isConnected {
+                            Text("Connected as \(oneDrive.accountName)").font(.system(size: 11))
+                            Spacer(minLength: 0)
+                            Button("Sign Out") { oneDrive.disconnect() }
+                                .buttonStyle(.bordered).controlSize(.small)
+                        } else {
+                            Text("Not connected").font(.system(size: 11)).foregroundColor(.secondary)
+                            Spacer(minLength: 0)
+                            Button("Connect OneDrive…") { oneDrive.connect() }
+                                .buttonStyle(.bordered).controlSize(.small)
+                        }
+                    }
+                    .padding(.horizontal, 10).frame(height: 32)
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .cornerRadius(6).overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.2), lineWidth: 1))
                 }
             }
             .padding().background(Color(NSColor.windowBackgroundColor))
@@ -443,7 +490,26 @@ struct ContentView: View {
             }
 
             // Duplicates List
-            if mode == .photos {
+            if source == .oneDrive {
+                if oneDrive.isConnected && mode == .files {
+                    CloudFilesView(engine: oneDriveEngine, auth: oneDrive)
+                } else {
+                    Spacer()
+                    VStack(spacing: 12) {
+                        Image(systemName: "cloud").font(.system(size: 48)).foregroundColor(.gray.opacity(0.25))
+                        Text(oneDrive.isConnected ? "OneDrive — \(mode.rawValue)" : "OneDrive")
+                            .font(.title3).fontWeight(.semibold)
+                        Text(oneDrive.isConnected
+                             ? (mode == .files ? "Press Search to scan." : "Duplicate \(mode.rawValue.lowercased()) on OneDrive arrives in a later update.")
+                             : "Connect your OneDrive account to scan it for duplicates.")
+                            .font(.caption).foregroundColor(.secondary).multilineTextAlignment(.center)
+                        if !oneDrive.status.isEmpty {
+                            Text(oneDrive.status).font(.caption2).foregroundColor(.secondary)
+                        }
+                    }
+                    Spacer()
+                }
+            } else if mode == .photos {
                 PhotosModeView(engine: photoEngine, hasFolders: !sourceFolders.isEmpty, selectedPhotoID: $selectedPhotoID)
             } else if !scanner.duplicateGroups.isEmpty || !scanner.folderDuplicateGroups.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
@@ -963,6 +1029,16 @@ struct ContentView: View {
     }
 
     private func startScanning() {
+        if source == .oneDrive {
+            if oneDriveEngine.isScanning { oneDriveEngine.stop(); return }
+            guard oneDrive.isConnected else { return }
+            if mode == .files {
+                oneDriveEngine.scan(auth: oneDrive)
+            } else {
+                oneDrive.status = "OneDrive \(mode.rawValue) scanning arrives in a later update."
+            }
+            return
+        }
         if mode == .photos {
             if photoEngine.isScanning { photoEngine.stop(); return }
             guard !sourceFolders.isEmpty else { return }
