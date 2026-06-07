@@ -5,7 +5,7 @@ features land or plans change.
 
 Status legend: ✅ Done · 🚧 In progress / uncommitted · 📋 Planned
 
-Latest released version: **v1.12.0**. Unreleased work below would ship as the next version.
+Latest released version: **v1.13.0**.
 
 ---
 
@@ -61,8 +61,8 @@ SHA-256 for cloud content matching.
 | **Files** — Quick Look preview w/ download progress | ✅ | v1.12.0 |
 | **Files** — per-file / per-group / delete-all to recycle bin | ✅ | v1.12.0 |
 | **Files** — operation logging + reveal log | ✅ | |
-| **Folders** — duplicate folder cluster detection | 🚧 | Built; **untested** against a real account. Reuses local union-find on crawled files |
-| **Folders** — in-place merge (move uniques → keep, recycle others, rename, review, merge-all, log dropdown) | 🚧 | Built; **UNTESTED** against a real account — destructive cloud ops, verify before relying on it. Graph `PATCH parentReference` / `DELETE` / `PATCH name` |
+| **Folders** — duplicate folder cluster detection | ✅ | v1.13.0; reuses local union-find on crawled files |
+| **Folders** — in-place merge (move uniques → keep, recycle others, rename, review, merge-all, log dropdown) | ✅ | v1.13.0; verified against a real account. Graph `PATCH parentReference` / `DELETE` / `PATCH name` |
 | **Folders** — "Copy to new folder" (safe merge) | 📋 | Destination selectable: new folder in OneDrive (cloud-to-cloud copy) **or** a local folder (download/export) |
 | **Folders** — delete redundant folders only | 📋 | Lower-risk variant; may be obsoleted by the in-place merge |
 | **Photos** — cloud similar-photo detection | 📋 | Not started; needs image/thumbnail download + perceptual hashing |
@@ -96,7 +96,7 @@ SHA-256 for cloud content matching.
 | v1.10.0 | In-app Operation History (logs viewer) |
 | v1.11.0 | OneDrive (Files): connect + cloud duplicate detection & delete |
 | v1.12.0 | OneDrive folder selection, cloud preview/progress, per-file delete; Help & entitlement fixes |
-| _unreleased_ | OneDrive Folders: duplicate cluster detection + in-place merge (🚧 **untested** against a real account) |
+| v1.13.0 | OneDrive Folders: duplicate cluster detection + in-place merge (verified) |
 
 > Note: the web portal / marketing site and licensing tools shared this repo early
 > on, then were split into separate repositories (mid-April 2026). Their commits are
