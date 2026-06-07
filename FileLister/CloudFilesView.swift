@@ -59,7 +59,7 @@ struct CloudFilesView: View {
                 ScrollView {
                     LazyVStack(spacing: 8) {
                         ForEach(engine.groups) { group in
-                            groupCard(group)
+                            CloudGroupCard(engine: engine, auth: auth, group: group, selectedCloudID: $selectedCloudID)
                         }
                     }
                     .padding(.horizontal)
@@ -68,18 +68,27 @@ struct CloudFilesView: View {
         }
     }
 
-    @ViewBuilder
-    private func groupCard(_ group: CloudDupGroup) -> some View {
+}
+
+// One duplicate-content group: header (save/copies/delete) + per-file rows.
+// Shared by the Files view and the Folders (cluster) view.
+struct CloudGroupCard: View {
+    @ObservedObject var engine: OneDriveEngine
+    @ObservedObject var auth: OneDriveAuth
+    let group: CloudDupGroup
+    @Binding var selectedCloudID: String?
+
+    var body: some View {
         let live = group.files.filter { !engine.deletedIDs.contains($0.id) }
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Image(systemName: "doc.on.doc").foregroundColor(.blue)
                 Text(group.name).fontWeight(.bold).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
-                Text("(\(byteString(group.sizeBytes)))").font(.caption2).foregroundColor(.secondary)
+                Text("(\(cloudByteString(group.sizeBytes)))").font(.caption2).foregroundColor(.secondary)
                 Spacer()
                 HStack(spacing: 4) {
                     Image(systemName: "internaldrive").font(.system(size: 8))
-                    Text("Save \(byteString(group.reclaimable(excluding: engine.deletedIDs)))").font(.system(size: 9, weight: .medium))
+                    Text("Save \(cloudByteString(group.reclaimable(excluding: engine.deletedIDs)))").font(.system(size: 9, weight: .medium))
                 }
                 .foregroundColor(.green)
                 .padding(.horizontal, 7).padding(.vertical, 3)
@@ -138,11 +147,11 @@ struct CloudFilesView: View {
         }
         .padding(6).background(live.count > 1 ? Color.orange.opacity(0.08) : Color.green.opacity(0.05)).cornerRadius(4)
     }
+}
 
-    private func byteString(_ bytes: Int64) -> String {
-        let kb = Double(bytes) / 1024, mb = kb / 1024, gb = mb / 1024
-        if gb >= 1 { return String(format: "%.2f GB", gb) }
-        if mb >= 1 { return String(format: "%.1f MB", mb) }
-        return String(format: "%.0f KB", kb)
-    }
+func cloudByteString(_ bytes: Int64) -> String {
+    let kb = Double(bytes) / 1024, mb = kb / 1024, gb = mb / 1024
+    if gb >= 1 { return String(format: "%.2f GB", gb) }
+    if mb >= 1 { return String(format: "%.1f MB", mb) }
+    return String(format: "%.0f KB", kb)
 }

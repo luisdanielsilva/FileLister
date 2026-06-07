@@ -164,6 +164,13 @@ struct ContentView: View {
     @State private var walkthroughQueue: [FolderDuplicateGroup] = []
     @State private var walkthroughIndex = 0
     @State private var approvedFolderIDs: Set<UUID> = []
+    // OneDrive folder merge (mirror of the local flow above)
+    @State private var previewCloudCluster: CloudFolderDupGroup? = nil
+    @State private var showingCloudMergeAllSheet = false
+    @State private var cloudWalkthroughActive = false
+    @State private var cloudWalkthroughQueue: [CloudFolderDupGroup] = []
+    @State private var cloudWalkthroughIndex = 0
+    @State private var approvedCloudIDs: Set<UUID> = []
 
     var hasRemovableDuplicates: Bool {
         for group in scanner.duplicateGroups {
@@ -482,6 +489,55 @@ struct ContentView: View {
                         .help("Show the most recent merge log in Finder")
                     }
                 }
+
+                // OneDrive folder-merge controls (mirror local Folders mode)
+                if source == .oneDrive && mode == .folders && !oneDriveEngine.folderGroups.isEmpty && !oneDriveEngine.isScanning {
+                    Toggle(isOn: $oneDriveEngine.renameKeptFolder) {
+                        Label("Rename kept folder", systemImage: "pencil").font(.system(size: 10))
+                    }
+                    .toggleStyle(.checkbox)
+                    .help("When on, the kept folder is renamed with the merged tag. When off, it keeps its original name and just gains the merged files.")
+
+                    Button(action: { startCloudWalkthrough() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "rectangle.stack.badge.play")
+                            Text("Review One-by-One")
+                        }
+                        .font(.system(size: 10, weight: .bold)).foregroundColor(.indigo)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Color.indigo.opacity(0.1)).cornerRadius(5)
+                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.indigo.opacity(0.3), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Step through each folder cluster and approve or skip individually")
+
+                    Button(action: { showingCloudMergeAllSheet = true }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.triangle.merge")
+                            Text("Merge All Folders")
+                        }
+                        .font(.system(size: 10, weight: .bold)).foregroundColor(.indigo)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Color.indigo.opacity(0.1)).cornerRadius(5)
+                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.indigo.opacity(0.3), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+
+                    Picker("", selection: $scanner.logLocationMode) {
+                        Text("Log: App folder").tag(LogLocationMode.appFolder)
+                        Text("Log: Ask each time").tag(LogLocationMode.askEachTime)
+                    }
+                    .pickerStyle(.menu).frame(width: 150)
+                    .help("Where the merge log (JSON + HTML) is saved after each merge.")
+
+                    if let logURL = oneDriveEngine.lastLogURL {
+                        Button(action: { NSWorkspace.shared.activateFileViewerSelecting([logURL]) }) {
+                            Label("Reveal Log", systemImage: "doc.text.magnifyingglass").font(.system(size: 10))
+                        }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        .help("Show the most recent merge log in Finder")
+                    }
+                }
                 if hasRemovableDuplicates && !scanner.isScanning {
                     Button(action: {
                         if licenseManager.isRegistered {
@@ -526,6 +582,9 @@ struct ContentView: View {
             if source == .oneDrive {
                 if oneDrive.isConnected && mode == .files && (!selectedCloudFolders.isEmpty || !oneDriveEngine.groups.isEmpty) {
                     CloudFilesView(engine: oneDriveEngine, auth: oneDrive, selectedCloudID: $selectedCloudID)
+                } else if oneDrive.isConnected && mode == .folders && (!selectedCloudFolders.isEmpty || !oneDriveEngine.folderGroups.isEmpty) {
+                    CloudFoldersView(engine: oneDriveEngine, auth: oneDrive, selectedCloudID: $selectedCloudID,
+                                     onMergeCluster: { previewCloudCluster = $0 })
                 } else {
                     Spacer()
                     VStack(spacing: 12) {
@@ -533,12 +592,12 @@ struct ContentView: View {
                         Text(oneDrive.isConnected ? "OneDrive — \(mode.rawValue)" : "OneDrive")
                             .font(.title3).fontWeight(.semibold)
                         Text(oneDrive.isConnected
-                             ? (mode == .files
+                             ? ((mode == .files || mode == .folders)
                                 ? "Add one or more OneDrive folders, then press Search."
                                 : "Duplicate \(mode.rawValue.lowercased()) on OneDrive arrives in a later update.")
                              : "Connect your OneDrive account to scan it for duplicates.")
                             .font(.caption).foregroundColor(.secondary).multilineTextAlignment(.center)
-                        if oneDrive.isConnected && mode == .files && selectedCloudFolders.isEmpty {
+                        if oneDrive.isConnected && (mode == .files || mode == .folders) && selectedCloudFolders.isEmpty {
                             Button("Add OneDrive Folder…") { showingCloudPicker = true }
                                 .controlSize(.small)
                         }
@@ -748,6 +807,40 @@ struct ContentView: View {
                 onCancel: { folderGroupToMerge = nil }
             )
         }
+        .sheet(item: $previewCloudCluster) { cluster in
+            if cloudWalkthroughActive && cloudWalkthroughIndex < cloudWalkthroughQueue.count {
+                CloudClusterSheet(
+                    engine: oneDriveEngine, auth: oneDrive,
+                    cluster: cloudWalkthroughQueue[cloudWalkthroughIndex],
+                    selectedCloudID: $selectedCloudID,
+                    progressLabel: "Cluster \(cloudWalkthroughIndex + 1) of \(cloudWalkthroughQueue.count)",
+                    onApproveNext: { approveAndAdvanceCloud() },
+                    onSkip: { advanceCloudWalkthrough() },
+                    onClose: { cancelCloudWalkthrough() }
+                )
+                .id(cloudWalkthroughIndex)
+            } else {
+                CloudClusterSheet(
+                    engine: oneDriveEngine, auth: oneDrive,
+                    cluster: cluster, selectedCloudID: $selectedCloudID,
+                    onMerge: {
+                        previewCloudCluster = nil
+                        mergeCloud([cluster])
+                    },
+                    onClose: { previewCloudCluster = nil }
+                )
+            }
+        }
+        .sheet(isPresented: $showingCloudMergeAllSheet) {
+            CloudMergeAllSheet(
+                engine: oneDriveEngine, scanner: scanner,
+                onMergeAll: {
+                    showingCloudMergeAllSheet = false
+                    mergeCloud(oneDriveEngine.folderGroups)
+                },
+                onCancel: { showingCloudMergeAllSheet = false }
+            )
+        }
         .alert("Register the application to use this feature", isPresented: $showingRegisterAlert) {
             Button("Register here") {
                 if let url = URL(string: "https://www.luisdanielsilva.com") {
@@ -826,7 +919,7 @@ struct ContentView: View {
 
     // Cloud (OneDrive) navigation — flattened over all groups, skipping deleted files
     private var cloudOrder: [CloudFileInfo] {
-        oneDriveEngine.groups.flatMap { $0.files.filter { !oneDriveEngine.deletedIDs.contains($0.id) } }
+        oneDriveEngine.displayGroups.flatMap { $0.files.filter { !oneDriveEngine.deletedIDs.contains($0.id) } }
     }
     private var selectedCloudFile: CloudFileInfo? { cloudOrder.first { $0.id == selectedCloudID } }
 
@@ -1094,6 +1187,8 @@ struct ContentView: View {
             guard oneDrive.isConnected, !selectedCloudFolders.isEmpty else { return }
             if mode == .files {
                 oneDriveEngine.scan(auth: oneDrive, folders: selectedCloudFolders)
+            } else if mode == .folders {
+                oneDriveEngine.scan(auth: oneDrive, folders: selectedCloudFolders, folderMode: true)
             } else {
                 oneDrive.status = "OneDrive \(mode.rawValue) scanning arrives in a later update."
             }
@@ -1148,6 +1243,49 @@ struct ContentView: View {
         walkthroughActive = false
         previewFolderGroup = nil
         approvedFolderIDs = []
+    }
+
+    // MARK: - OneDrive folder merge + walkthrough
+
+    private func mergeCloud(_ groups: [CloudFolderDupGroup]) {
+        oneDriveEngine.mergeFolders(groups,
+            mergedName: { a, b in scanner.computeMergedFolderName(folderA: a, folderB: b) },
+            logDir: resolveLogDirectory(),
+            auth: oneDrive)
+    }
+
+    private func startCloudWalkthrough() {
+        cloudWalkthroughQueue = oneDriveEngine.folderGroups
+        guard let first = cloudWalkthroughQueue.first else { return }
+        cloudWalkthroughIndex = 0
+        approvedCloudIDs = []
+        cloudWalkthroughActive = true
+        previewCloudCluster = first
+    }
+
+    private func approveAndAdvanceCloud() {
+        approvedCloudIDs.insert(cloudWalkthroughQueue[cloudWalkthroughIndex].id)
+        advanceCloudWalkthrough()
+    }
+
+    private func advanceCloudWalkthrough() {
+        let next = cloudWalkthroughIndex + 1
+        if next >= cloudWalkthroughQueue.count { finishCloudWalkthrough() }
+        else { cloudWalkthroughIndex = next }
+    }
+
+    private func finishCloudWalkthrough() {
+        cloudWalkthroughActive = false
+        previewCloudCluster = nil
+        let approved = cloudWalkthroughQueue.filter { approvedCloudIDs.contains($0.id) }
+        guard !approved.isEmpty else { return }
+        mergeCloud(approved)
+    }
+
+    private func cancelCloudWalkthrough() {
+        cloudWalkthroughActive = false
+        previewCloudCluster = nil
+        approvedCloudIDs = []
     }
 
     // When the log mode is "ask each time", prompt for a folder; otherwise return nil
