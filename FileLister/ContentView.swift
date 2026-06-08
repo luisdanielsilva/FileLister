@@ -179,7 +179,15 @@ struct ContentView: View {
         }
         return false
     }
-    
+
+    // True when the Actions row has anything to show (merge controls or Clean All).
+    var hasActionControls: Bool {
+        let localMerge = !scanner.folderDuplicateGroups.isEmpty && !scanner.isScanning
+        let cloudMerge = source == .oneDrive && mode == .folders && !oneDriveEngine.folderGroups.isEmpty && !oneDriveEngine.isScanning
+        let cleanAll = hasRemovableDuplicates && !scanner.isScanning
+        return localMerge || cloudMerge || cleanAll
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Mode switcher + source (Local / OneDrive)
@@ -333,8 +341,11 @@ struct ContentView: View {
             }
             .padding().background(Color(NSColor.windowBackgroundColor))
             
-            // Analysis Options + Sorting
-            HStack(spacing: 20) {
+            // Analysis Options + Sorting — two rows: Options (top) / Actions (bottom)
+            VStack(alignment: .leading, spacing: 8) {
+              // ── Options ──
+              HStack(spacing: 20) {
+                Text("OPTIONS").font(.system(size: 9, weight: .bold)).foregroundColor(.secondary.opacity(0.6))
                 HStack(spacing: 15) {
                     if mode == .files {
                         Toggle(isOn: $scanner.useDeepAnalysis) {
@@ -407,9 +418,14 @@ struct ContentView: View {
                         sortButton(label: "Match Ratio", criteria: .matchRatio)
                     }
                 }
-                
                 Spacer()
-                
+              }   // end Options row
+
+              // ── Actions ──
+              if hasActionControls {
+                Divider()
+                HStack(spacing: 12) {
+                  Text("ACTIONS").font(.system(size: 9, weight: .bold)).foregroundColor(.secondary.opacity(0.6))
                 if !scanner.folderDuplicateGroups.isEmpty && !scanner.isScanning {
                     Toggle(isOn: $scanner.safeMergeToNewFolder) {
                         Label("Copy to new folder", systemImage: "doc.on.doc").font(.system(size: 10))
@@ -538,6 +554,7 @@ struct ContentView: View {
                         .help("Show the most recent merge log in Finder")
                     }
                 }
+                Spacer()
                 if hasRemovableDuplicates && !scanner.isScanning {
                     Button(action: {
                         if licenseManager.isRegistered {
@@ -558,7 +575,9 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
                 }
-            }
+                }   // end Actions row
+              }     // end if hasActionControls
+            }       // end VStack
             .padding(.bottom, 10).padding(.horizontal).frame(maxWidth: .infinity, alignment: .leading)
 
 
