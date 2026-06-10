@@ -128,7 +128,11 @@ enum AppMode: String, CaseIterable, Identifiable {
 }
 
 struct ContentView: View {
-    @StateObject private var scanner = FileScanner()
+    // Separate engines so Files and Folders keep independent, persistent results.
+    @StateObject private var fileScanner = FileScanner(detectFolderDuplicates: false)
+    @StateObject private var folderScanner = FileScanner(detectFolderDuplicates: true)
+    // The scanner for the current mode (Folders uses its own; everything else uses the file scanner).
+    private var scanner: FileScanner { mode == .folders ? folderScanner : fileScanner }
     @StateObject private var photoEngine = PhotoEngine()
     @StateObject private var oneDrive = OneDriveAuth()
     @StateObject private var oneDriveEngine = OneDriveEngine()
@@ -143,7 +147,12 @@ struct ContentView: View {
         if source == .oneDrive { return oneDriveEngine.isScanning }
         return mode == .photos ? photoEngine.isScanning : scanner.isScanning
     }
-    @State private var sourceFolders: [URL] = []
+    // Folder selection is per-mode, so each mode's bar matches its own results.
+    @State private var sourceFoldersByMode: [AppMode: [URL]] = [:]
+    private var sourceFolders: [URL] {
+        get { sourceFoldersByMode[mode] ?? [] }
+        nonmutating set { sourceFoldersByMode[mode] = newValue }
+    }
     @State private var collapsedRoots: Set<String> = []
     private let acrossKey = "__across_multiple__"
     
@@ -172,18 +181,35 @@ struct ContentView: View {
     @State private var cloudWalkthroughIndex = 0
     @State private var approvedCloudIDs: Set<UUID> = []
     @State private var collapsedFolderGroupIDs: Set<UUID> = []
+    @State private var searchedModes: Set<AppMode> = []  // modes that have run at least one search this session
 
     var hasRemovableDuplicates: Bool {
-        for group in scanner.duplicateGroups {
+        for group in shownFileGroups {
             let activeCount = group.files.filter { !scanner.deletedPaths.contains($0.fullPath) }.count
             if activeCount > 1 { return true }
         }
         return false
     }
 
+    // Results shown for the CURRENT mode only. Files & Folders share the scanner,
+    // so gate by which mode last ran it; results persist across mode switches and
+    // change only on a new search.
+    var shownFileGroups: [DuplicateGroup] {
+        mode == .files ? fileScanner.duplicateGroups : []
+    }
+    var shownFolderGroups: [FolderDuplicateGroup] {
+        mode == .folders ? folderScanner.folderDuplicateGroups : []
+    }
+
+    // Show the scanner savings/recoveries only in the local mode that produced them.
+    var showScannerStats: Bool {
+        source == .local && (mode == .files || mode == .folders) && searchedModes.contains(mode) &&
+        (scanner.totalPotentialSavings > 0 || scanner.totalRecovered > 0)
+    }
+
     // True when the Actions row has anything to show (merge controls or Clean All).
     var hasActionControls: Bool {
-        let localMerge = !scanner.folderDuplicateGroups.isEmpty && !scanner.isScanning
+        let localMerge = !shownFolderGroups.isEmpty && !scanner.isScanning
         let cloudMerge = source == .oneDrive && mode == .folders && !oneDriveEngine.folderGroups.isEmpty && !oneDriveEngine.isScanning
         let cleanAll = hasRemovableDuplicates && !scanner.isScanning
         return localMerge || cloudMerge || cleanAll
@@ -201,10 +227,9 @@ struct ContentView: View {
                 .pickerStyle(.segmented)
                 .labelStyle(.titleAndIcon)
                 .disabled(scanner.isScanning)
-                .onChange(of: mode) { newMode in
-                    scanner.detectFolderDuplicates = (newMode == .folders)
-                    scanner.duplicateGroups = []
-                    scanner.folderDuplicateGroups = []
+                .onChange(of: mode) { _ in
+                    // Each mode has its own engine, so results persist across switches
+                    // and change only on a new search. Just clear the visual selection.
                     selectedFolderGroupID = nil
                     selectedFile = nil
                 }
@@ -280,7 +305,7 @@ struct ContentView: View {
 
                     // Scan scope — only relevant with 2+ folders
                     if sourceFolders.count >= 2 {
-                        Picker("", selection: $scanner.scanScope) {
+                        Picker("", selection: Binding(get: { scanner.scanScope }, set: { scanner.scanScope = $0 })) {
                             Text("Across all").tag(ScanScope.combined)
                             Text("Within each").tag(ScanScope.perFolder)
                         }
@@ -349,34 +374,34 @@ struct ContentView: View {
                 Text("OPTIONS").font(.system(size: 9, weight: .bold)).foregroundColor(.secondary.opacity(0.6))
                 HStack(spacing: 15) {
                     if mode == .files {
-                        Toggle(isOn: $scanner.useDeepAnalysis) {
+                        Toggle(isOn: $fileScanner.useDeepAnalysis) {
                             Label("Deep Scan", systemImage: "checkmark.shield").font(.system(size: 10))
                         }
                         .toggleStyle(.checkbox).disabled(scanner.isScanning)
-                        Toggle(isOn: $scanner.filterMediaOnly) {
+                        Toggle(isOn: $fileScanner.filterMediaOnly) {
                             Label("Media", systemImage: "photo.on.rectangle").font(.system(size: 10))
                         }
                         .toggleStyle(.checkbox).disabled(scanner.isScanning)
-                        Toggle(isOn: $scanner.skipHiddenFiles) {
+                        Toggle(isOn: $fileScanner.skipHiddenFiles) {
                             Label("No Hidden", systemImage: "eye.slash").font(.system(size: 10))
                         }
                         .toggleStyle(.checkbox).disabled(scanner.isScanning)
-                        Toggle(isOn: $scanner.detectSymlinks) {
+                        Toggle(isOn: $fileScanner.detectSymlinks) {
                             Label("Symlinks", systemImage: "link").font(.system(size: 10))
                         }
                         .toggleStyle(.checkbox).disabled(scanner.isScanning)
                     } else if mode == .folders {
-                        Toggle(isOn: $scanner.filterMediaOnly) {
+                        Toggle(isOn: $folderScanner.filterMediaOnly) {
                             Label("Media", systemImage: "photo.on.rectangle").font(.system(size: 10))
                         }
                         .toggleStyle(.checkbox).disabled(scanner.isScanning)
-                        Toggle(isOn: $scanner.skipHiddenFiles) {
+                        Toggle(isOn: $folderScanner.skipHiddenFiles) {
                             Label("No Hidden", systemImage: "eye.slash").font(.system(size: 10))
                         }
                         .toggleStyle(.checkbox).disabled(scanner.isScanning)
                         HStack(spacing: 4) {
                             Text("Match:").font(.system(size: 10)).foregroundColor(.secondary)
-                            Slider(value: $scanner.folderMatchThreshold, in: 0.5...1.0, step: 0.05)
+                            Slider(value: $folderScanner.folderMatchThreshold, in: 0.5...1.0, step: 0.05)
                                 .frame(width: 80)
                                 .disabled(scanner.isScanning)
                             Text("\(Int(scanner.folderMatchThreshold * 100))%").font(.system(size: 10, weight: .medium)).frame(width: 28)
@@ -427,8 +452,8 @@ struct ContentView: View {
                 Divider()
                 HStack(spacing: 12) {
                   Text("ACTIONS").font(.system(size: 9, weight: .bold)).foregroundColor(.secondary.opacity(0.6))
-                if !scanner.folderDuplicateGroups.isEmpty && !scanner.isScanning {
-                    Toggle(isOn: $scanner.safeMergeToNewFolder) {
+                if !shownFolderGroups.isEmpty && !scanner.isScanning {
+                    Toggle(isOn: $folderScanner.safeMergeToNewFolder) {
                         Label("Copy to new folder", systemImage: "doc.on.doc").font(.system(size: 10))
                     }
                     .toggleStyle(.checkbox)
@@ -454,44 +479,14 @@ struct ContentView: View {
                     }
 
                     if !scanner.safeMergeToNewFolder {
-                        Toggle(isOn: $scanner.renameKeptFolder) {
+                        Toggle(isOn: $folderScanner.renameKeptFolder) {
                             Label("Rename kept folder", systemImage: "pencil").font(.system(size: 10))
                         }
                         .toggleStyle(.checkbox)
                         .help("When on, the kept folder is renamed with the merged tag (e.g. \"…_merged\"). When off, it keeps its original name and just gains the merged files.")
                     }
 
-                    Button(action: { startWalkthrough() }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "rectangle.stack.badge.play")
-                            Text("Review One-by-One")
-                        }
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.indigo)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(Color.indigo.opacity(0.1)).cornerRadius(5)
-                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.indigo.opacity(0.3), lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Step through each folder pair and approve or skip individually")
-
-                    Button(action: {
-                        if scanner.safeMergeToNewFolder { safeMergeBatch(scanner.folderDuplicateGroups) }
-                        else { showingMergeAllSheet = true }
-                    }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: scanner.safeMergeToNewFolder ? "doc.on.doc" : "arrow.triangle.merge")
-                            Text(scanner.safeMergeToNewFolder ? "Merge All to New" : "Merge All Folders")
-                        }
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.indigo)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(Color.indigo.opacity(0.1)).cornerRadius(5)
-                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.indigo.opacity(0.3), lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-
-                    Picker("", selection: $scanner.logLocationMode) {
+                    Picker("", selection: $folderScanner.logLocationMode) {
                         Text("Log: App folder").tag(LogLocationMode.appFolder)
                         Text("Log: Ask each time").tag(LogLocationMode.askEachTime)
                     }
@@ -515,32 +510,7 @@ struct ContentView: View {
                     .toggleStyle(.checkbox)
                     .help("When on, the kept folder is renamed with the merged tag. When off, it keeps its original name and just gains the merged files.")
 
-                    Button(action: { startCloudWalkthrough() }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "rectangle.stack.badge.play")
-                            Text("Review One-by-One")
-                        }
-                        .font(.system(size: 10, weight: .bold)).foregroundColor(.indigo)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(Color.indigo.opacity(0.1)).cornerRadius(5)
-                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.indigo.opacity(0.3), lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Step through each folder cluster and approve or skip individually")
-
-                    Button(action: { showingCloudMergeAllSheet = true }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.triangle.merge")
-                            Text("Merge All Folders")
-                        }
-                        .font(.system(size: 10, weight: .bold)).foregroundColor(.indigo)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(Color.indigo.opacity(0.1)).cornerRadius(5)
-                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.indigo.opacity(0.3), lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-
-                    Picker("", selection: $scanner.logLocationMode) {
+                    Picker("", selection: $folderScanner.logLocationMode) {
                         Text("Log: App folder").tag(LogLocationMode.appFolder)
                         Text("Log: Ask each time").tag(LogLocationMode.askEachTime)
                     }
@@ -556,6 +526,65 @@ struct ContentView: View {
                     }
                 }
                 Spacer()
+                // Primary folder-merge actions — right-aligned so "Merge All Folders"
+                // lands in the same spot as "Clean All Duplicates" when switching modes.
+                if !shownFolderGroups.isEmpty && !scanner.isScanning {
+                    Button(action: { startWalkthrough() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "rectangle.stack.badge.play")
+                            Text("Review One-by-One")
+                        }
+                        .font(.system(size: 10, weight: .bold)).foregroundColor(.indigo)
+                        .frame(width: 150, height: 24)
+                        .background(Color.indigo.opacity(0.1)).cornerRadius(5)
+                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.indigo.opacity(0.3), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Step through each folder pair and approve or skip individually")
+
+                    Button(action: {
+                        if scanner.safeMergeToNewFolder { safeMergeBatch(scanner.folderDuplicateGroups) }
+                        else { showingMergeAllSheet = true }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: scanner.safeMergeToNewFolder ? "doc.on.doc" : "arrow.triangle.merge")
+                            Text(scanner.safeMergeToNewFolder ? "Merge All to New" : "Merge All Folders")
+                        }
+                        .font(.system(size: 10, weight: .bold)).foregroundColor(.indigo)
+                        .frame(width: 150, height: 24)
+                        .background(Color.indigo.opacity(0.1)).cornerRadius(5)
+                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.indigo.opacity(0.3), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if source == .oneDrive && mode == .folders && !oneDriveEngine.folderGroups.isEmpty && !oneDriveEngine.isScanning {
+                    Button(action: { startCloudWalkthrough() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "rectangle.stack.badge.play")
+                            Text("Review One-by-One")
+                        }
+                        .font(.system(size: 10, weight: .bold)).foregroundColor(.indigo)
+                        .frame(width: 150, height: 24)
+                        .background(Color.indigo.opacity(0.1)).cornerRadius(5)
+                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.indigo.opacity(0.3), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Step through each folder cluster and approve or skip individually")
+
+                    Button(action: { showingCloudMergeAllSheet = true }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.triangle.merge")
+                            Text("Merge All Folders")
+                        }
+                        .font(.system(size: 10, weight: .bold)).foregroundColor(.indigo)
+                        .frame(width: 150, height: 24)
+                        .background(Color.indigo.opacity(0.1)).cornerRadius(5)
+                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.indigo.opacity(0.3), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 if hasRemovableDuplicates && !scanner.isScanning {
                     Button(action: {
                         if licenseManager.isRegistered {
@@ -570,7 +599,7 @@ struct ContentView: View {
                         }
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.red)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .frame(width: 150, height: 24)
                         .background(Color.red.opacity(0.1)).cornerRadius(5)
                         .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.red.opacity(0.3), lineWidth: 1))
                     }
@@ -629,10 +658,10 @@ struct ContentView: View {
                 }
             } else if mode == .photos {
                 PhotosModeView(engine: photoEngine, hasFolders: !sourceFolders.isEmpty, selectedPhotoID: $selectedPhotoID)
-            } else if !scanner.duplicateGroups.isEmpty || !scanner.folderDuplicateGroups.isEmpty {
+            } else if !shownFileGroups.isEmpty || !shownFolderGroups.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
-                        Text("Duplicate Groups found (\(scanner.duplicateGroups.count + scanner.folderDuplicateGroups.count)):").font(.caption).fontWeight(.bold)
+                        Text("Duplicate Groups found (\(shownFileGroups.count + shownFolderGroups.count)):").font(.caption).fontWeight(.bold)
                         Spacer()
                         Text("Space to Preview").font(.system(size: 8, weight: .bold)).foregroundColor(.blue)
                         Text("Safety Lock Active").font(.system(size: 9, weight: .bold)).foregroundColor(.orange)
@@ -648,15 +677,15 @@ struct ContentView: View {
                                     collapsibleSectionHeader(key)
                                     if !collapsedRoots.contains(key) {
                                         if scanner.detectFolderDuplicates {
-                                            ForEach(scanner.folderDuplicateGroups.filter { sectionKey(forFolderGroup: $0) == key }) { folderGroupRow($0) }
+                                            ForEach(shownFolderGroups.filter { sectionKey(forFolderGroup: $0) == key }) { folderGroupRow($0) }
                                         } else {
-                                            ForEach(scanner.duplicateGroups.filter { sectionKey(forFileGroup: $0) == key }) { fileGroupRow($0) }
+                                            ForEach(shownFileGroups.filter { sectionKey(forFileGroup: $0) == key }) { fileGroupRow($0) }
                                         }
                                     }
                                 }
                             } else {
-                                ForEach(scanner.detectFolderDuplicates ? scanner.folderDuplicateGroups : []) { folderGroupRow($0) }
-                                ForEach(scanner.detectFolderDuplicates ? [] : scanner.duplicateGroups) { fileGroupRow($0) }
+                                ForEach(shownFolderGroups) { folderGroupRow($0) }
+                                ForEach(shownFileGroups) { fileGroupRow($0) }
                             }
                         }
                         .padding(.horizontal)
@@ -664,12 +693,12 @@ struct ContentView: View {
                 }
             } else {
                 Spacer()
-                if !scanner.isScanning && (scanner.status == "Ready to start" || scanner.duplicateGroups.isEmpty) {
+                if !scanner.isScanning && (barStatus.isEmpty || shownFileGroups.isEmpty) {
                     Button(action: { selectSource() }) {
                         VStack {
-                            Image(systemName: scanner.duplicateGroups.isEmpty && !scanner.status.contains("Ready") ? "checkmark.circle" : "folder.badge.plus")
+                            Image(systemName: !barStatus.isEmpty && shownFileGroups.isEmpty && shownFolderGroups.isEmpty ? "checkmark.circle" : "folder.badge.plus")
                                 .font(.system(size: 40)).foregroundColor(.gray.opacity(0.2))
-                            Text(scanner.duplicateGroups.isEmpty && !scanner.status.contains("Ready") ? "No duplicates found" : "Add folder(s) to begin")
+                            Text(!barStatus.isEmpty && shownFileGroups.isEmpty && shownFolderGroups.isEmpty ? "No duplicates found" : "Add folder(s) to begin")
                                 .font(.caption2).foregroundColor(.secondary)
                         }
                     }
@@ -713,16 +742,15 @@ struct ContentView: View {
 
             // Status Bar
             HStack {
-                Circle().fill(
-                    scanner.status.contains("Error") ? Color.red :
-                    (scanner.isScanning ? Color.green : (scanner.status.contains("Completed") || scanner.status.contains("Trash") ? Color.blue : Color.gray))
-                )
-                    .frame(width: 7, height: 7)
-                Text(scanner.status)
-                    .font(.system(size: 10)).foregroundColor(.secondary)
+                if !barStatus.isEmpty {
+                    Circle().fill(barStatusColor)
+                        .frame(width: 7, height: 7)
+                    Text(barStatus)
+                        .font(.system(size: 10)).foregroundColor(.secondary)
+                }
                 Spacer()
                 
-                if scanner.totalPotentialSavings > 0 || scanner.totalRecovered > 0 {
+                if showScannerStats {
                     HStack(spacing: 12) {
                         HStack(spacing: 3) {
                             Image(systemName: "externaldrive.fill").font(.system(size: 8))
@@ -770,13 +798,15 @@ struct ContentView: View {
             .padding(.horizontal, 10).frame(height: 24).background(Color.gray.opacity(0.05)).overlay(Divider(), alignment: .top)
         }
         .frame(minWidth: 700, minHeight: 520)
-        .alert("Confirm Batch Deletion?", isPresented: $showingBatchDeleteConfirm) {
-            Button("Clean All", role: .destructive) {
-                scanner.recycleAllDuplicates()
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("⚠️ This action moves ALL detected duplicates to the Trash. This change is irreversible.\n\nNote: Original files (one per group) will be kept safe.")
+        .sheet(isPresented: $showingBatchDeleteConfirm) {
+            CleanAllConfirmationSheet(
+                composition: cleanComposition(shownFileGroups, deleted: scanner.deletedPaths),
+                onClean: {
+                    showingBatchDeleteConfirm = false
+                    scanner.recycleAllDuplicates()
+                },
+                onCancel: { showingBatchDeleteConfirm = false }
+            )
         }
         .sheet(item: $previewFolderGroup) { fg in
             if walkthroughActive && walkthroughIndex < walkthroughQueue.count {
@@ -1228,12 +1258,32 @@ struct ContentView: View {
         if mode == .photos {
             if photoEngine.isScanning { photoEngine.stop(); return }
             guard !sourceFolders.isEmpty else { return }
+            searchedModes.insert(.photos)
             photoEngine.startScan(sourceFolders)
             return
         }
         if scanner.isScanning { scanner.stopScan(); return }
         guard !sourceFolders.isEmpty else { return }
+        searchedModes.insert(mode)   // .files or .folders — each has its own engine
         scanner.startScan(sourceURLs: sourceFolders)
+    }
+
+    // The bottom-bar status pertains to the current mode only (empty if that mode
+    // hasn't run a search, or for the OneDrive source which shows its own status).
+    private var barStatus: String {
+        guard source == .local, searchedModes.contains(mode) else { return "" }
+        return mode == .photos ? photoEngine.status : scanner.status
+    }
+
+    private var barScanning: Bool {
+        mode == .photos ? photoEngine.isScanning : scanner.isScanning
+    }
+
+    private var barStatusColor: Color {
+        if barStatus.contains("Error") || barStatus.contains("failed") { return .red }
+        if barScanning { return .green }
+        if barStatus.contains("Completed") || barStatus.contains("Trash") { return .blue }
+        return .gray
     }
 
     // MARK: - One-by-one merge walkthrough
@@ -1736,6 +1786,51 @@ struct FolderDiffPreviewSheet: View {
             Circle().fill(color).frame(width: 7, height: 7)
             Text(label).font(.system(size: 9)).foregroundColor(.secondary)
         }
+    }
+}
+
+// Confirm "Clean All Duplicates" with a pie chart of what gets erased vs. kept.
+struct CleanAllConfirmationSheet: View {
+    let composition: MergeComposition
+    let onClean: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 8) {
+                Image(systemName: "trash.fill").font(.title2).foregroundColor(.red)
+                Text("Clean All Duplicates").font(.title2).fontWeight(.bold)
+            }
+
+            Divider()
+
+            MergePieChart(composition: composition)
+
+            HStack(spacing: 4) {
+                Image(systemName: "internaldrive").font(.system(size: 9)).foregroundColor(.green)
+                Text("Frees \(cloudByteString(composition.removedBytes))").font(.system(size: 12, weight: .semibold)).foregroundColor(.green)
+            }
+
+            Text("⚠️ Moves \(composition.removedCount) duplicate file(s) to the Trash. One copy per group is kept safe. This change is irreversible.")
+                .font(.system(size: 11)).foregroundColor(.secondary)
+
+            Divider()
+
+            HStack {
+                Button("Cancel", action: onCancel).buttonStyle(.bordered)
+                Spacer()
+                Button(action: onClean) {
+                    HStack(spacing: 6) { Image(systemName: "trash.fill"); Text("Clean All") }
+                        .fontWeight(.semibold).foregroundColor(.white)
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .background(Color.red).cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+                .disabled(composition.removedCount == 0)
+            }
+        }
+        .padding(24)
+        .frame(width: 480)
     }
 }
 

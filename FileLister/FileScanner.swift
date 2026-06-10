@@ -172,6 +172,10 @@ class FileScanner: ObservableObject {
         "mp4", "mov", "avi", "mkv", "wmv", "flv", "webm"
     ]
 
+    init(detectFolderDuplicates: Bool = false) {
+        self.detectFolderDuplicates = detectFolderDuplicates
+    }
+
     func startScan(sourceURL: URL) {
         startScan(sourceURLs: [sourceURL])
     }

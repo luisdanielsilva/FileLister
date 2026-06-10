@@ -108,6 +108,22 @@ func mergeComposition(_ groups: [CloudFolderDupGroup]) -> MergeComposition {
     groups.reduce(into: MergeComposition()) { acc, g in acc.add(mergeComposition(g)) }
 }
 
+// "Clean All Duplicates": one copy of each group is kept, the rest are erased
+// (reclaimed). No files are moved, so the pie shows erased vs. kept.
+func cleanComposition(_ groups: [DuplicateGroup], deleted: Set<String>) -> MergeComposition {
+    var c = MergeComposition()
+    for g in groups {
+        let live = g.files.filter { !deleted.contains($0.fullPath) }
+        guard live.count > 1 else { continue }
+        let removable = live.count - 1
+        c.removedCount += removable
+        c.removedBytes += Int64(g.sizeBytes) * Int64(removable)
+        c.keptCount += 1
+        c.keptBytes += Int64(g.sizeBytes)
+    }
+    return c
+}
+
 private extension MergeComposition {
     mutating func add(_ o: MergeComposition) {
         removedBytes += o.removedBytes; movedBytes += o.movedBytes; keptBytes += o.keptBytes
