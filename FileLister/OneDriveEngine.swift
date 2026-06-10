@@ -37,6 +37,8 @@ struct CloudFolderDupGroup: Identifiable {
     let matchedGroups: [CloudDupGroup] // content shared across the cluster's folders (2+ copies = removable)
     let filesToMove: [CloudFileInfo]   // one representative per distinct content the keep folder lacks
     let keepFileNames: Set<String>     // names already in the keep folder (for collision handling on merge)
+    let keptBytes: Int64               // total size of the kept folder's existing files (retained on merge)
+    let keptCount: Int                 // number of files already in the kept folder (retained on merge)
     let matchRatio: Double             // 0.75–1.0 (strongest pairwise similarity in the cluster)
 
     var keepFolder: String { folders.first ?? "" }
@@ -326,11 +328,15 @@ final class OneDriveEngine: ObservableObject {
                 }
             }
 
+            let keepFiles = files.filter { $0.path == keep }
+            let keptBytes = keepFiles.reduce(Int64(0)) { $0 + $1.size }
             out.append(CloudFolderDupGroup(
                 folders: ordered,
                 matchedGroups: matchedGroups.sorted { $0.reclaimable(excluding: []) > $1.reclaimable(excluding: []) },
                 filesToMove: filesToMove,
                 keepFileNames: keepFileNames,
+                keptBytes: keptBytes,
+                keptCount: keepFiles.count,
                 matchRatio: min(1.0, ratio)
             ))
         }

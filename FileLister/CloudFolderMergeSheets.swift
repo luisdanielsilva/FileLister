@@ -59,6 +59,8 @@ struct CloudClusterSheet: View {
                     .font(.system(size: 10)).foregroundColor(.green)
             }
 
+            MergePieChart(composition: mergeComposition(cluster))
+
             Divider()
 
             ScrollView {
@@ -133,6 +135,10 @@ struct CloudMergeAllSheet: View {
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(Color.indigo.opacity(0.1)).cornerRadius(4)
             }
+
+            Divider()
+
+            MergePieChart(composition: mergeComposition(engine.folderGroups))
 
             Divider()
 

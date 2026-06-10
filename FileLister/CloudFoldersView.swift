@@ -7,6 +7,7 @@ struct CloudFoldersView: View {
     @ObservedObject var auth: OneDriveAuth
     @Binding var selectedCloudID: String?
     var onMergeCluster: (CloudFolderDupGroup) -> Void
+    @State private var collapsedClusterIDs: Set<UUID> = []
 
     var body: some View {
         if engine.isScanning {
@@ -58,8 +59,17 @@ struct CloudFoldersView: View {
 
     @ViewBuilder
     private func clusterCard(_ cluster: CloudFolderDupGroup) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let isCollapsed = collapsedClusterIDs.contains(cluster.id)
+        return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
+                Button(action: {
+                    if isCollapsed { collapsedClusterIDs.remove(cluster.id) }
+                    else { collapsedClusterIDs.insert(cluster.id) }
+                }) {
+                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                        .font(.system(size: 9, weight: .bold)).foregroundColor(.blue).frame(width: 12)
+                }
+                .buttonStyle(.plain)
                 Image(systemName: "folder.fill").foregroundColor(.blue)
                 Text(cluster.keepName).fontWeight(.bold).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
                 Text("\(cluster.folders.count) folders").font(.system(size: 9, weight: .bold))
@@ -87,6 +97,7 @@ struct CloudFoldersView: View {
                 .disabled(engine.isScanning)
             }
 
+            if !isCollapsed {
             // Folders in the cluster (keep marked).
             ForEach(Array(cluster.folders.enumerated()), id: \.element) { idx, folder in
                 HStack(spacing: 6) {
@@ -108,6 +119,7 @@ struct CloudFoldersView: View {
             // Shared content (per-group / per-file delete reused from Files mode).
             ForEach(cluster.matchedGroups) { group in
                 CloudGroupCard(engine: engine, auth: auth, group: group, selectedCloudID: $selectedCloudID)
+            }
             }
         }
         .padding(6).background(Color.orange.opacity(0.08)).cornerRadius(4)

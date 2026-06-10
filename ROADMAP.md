@@ -63,9 +63,9 @@ SHA-256 for cloud content matching.
 | **Files** — operation logging + reveal log | ✅ | |
 | **Folders** — duplicate folder cluster detection | ✅ | v1.13.0; reuses local union-find on crawled files |
 | **Folders** — in-place merge (move uniques → keep, recycle others, rename, review, merge-all, log dropdown) | ✅ | v1.13.0; verified against a real account. Graph `PATCH parentReference` / `DELETE` / `PATCH name` |
-| **Folders** — "Copy to new folder" (safe merge) | 📋 | Destination selectable: new folder in OneDrive (cloud-to-cloud copy) **or** a local folder (download/export) |
+| **Folders** — "Copy to new folder" (safe merge) | 📋 | [#3](https://github.com/luisdanielsilva/FileLister/issues/3). Destination selectable: new folder in OneDrive (cloud-to-cloud copy) **or** a local folder (download/export) |
 | **Folders** — delete redundant folders only | 📋 | Lower-risk variant; may be obsoleted by the in-place merge |
-| **Photos** — cloud similar-photo detection | 📋 | Not started; needs image/thumbnail download + perceptual hashing |
+| **Photos** — cloud similar-photo detection | 📋 | [#4](https://github.com/luisdanielsilva/FileLister/issues/4). Not started; needs image/thumbnail download + perceptual hashing |
 
 ---
 

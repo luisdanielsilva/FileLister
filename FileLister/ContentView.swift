@@ -171,6 +171,7 @@ struct ContentView: View {
     @State private var cloudWalkthroughQueue: [CloudFolderDupGroup] = []
     @State private var cloudWalkthroughIndex = 0
     @State private var approvedCloudIDs: Set<UUID> = []
+    @State private var collapsedFolderGroupIDs: Set<UUID> = []
 
     var hasRemovableDuplicates: Bool {
         for group in scanner.duplicateGroups {
@@ -994,8 +995,17 @@ struct ContentView: View {
 
     @ViewBuilder
     private func folderGroupRow(_ folderGroup: FolderDuplicateGroup) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        let isCollapsed = collapsedFolderGroupIDs.contains(folderGroup.id)
+        return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
+                Button(action: {
+                    if isCollapsed { collapsedFolderGroupIDs.remove(folderGroup.id) }
+                    else { collapsedFolderGroupIDs.insert(folderGroup.id) }
+                }) {
+                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                        .font(.system(size: 9, weight: .bold)).foregroundColor(.indigo).frame(width: 12)
+                }
+                .buttonStyle(.plain)
                 Image(systemName: "folder.badge.questionmark")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.indigo)
@@ -1034,6 +1044,7 @@ struct ContentView: View {
                     .background(Color.indigo.opacity(0.1)).cornerRadius(3)
                     .help(folderGroup.tooltipText)
             }
+            if !isCollapsed {
             HStack(spacing: 12) {
                 Text("\(folderGroup.matchedGroups.count) shared files")
                     .font(.system(size: 9)).foregroundColor(.secondary)
@@ -1070,6 +1081,7 @@ struct ContentView: View {
                 .disabled(scanner.isScanning)
             }
             .padding(.leading, 4)
+            }
         }
         .padding(6)
         .background(selectedFolderGroupID == folderGroup.id ? Color.indigo.opacity(0.18) : Color.indigo.opacity(0.06))
@@ -1748,6 +1760,10 @@ struct MergeAllConfirmationSheet: View {
 
             Divider()
 
+            MergePieChart(composition: mergeComposition(scanner.folderDuplicateGroups))
+
+            Divider()
+
             // Naming controls (shared across all pairs)
             VStack(alignment: .leading, spacing: 10) {
                 Text("Naming rule (applied to all pairs)").font(.system(size: 12, weight: .semibold))
@@ -1880,13 +1896,15 @@ struct MergeConfirmationSheet: View {
                 .font(.system(size: 13))
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Label("\(folderGroup.matchedGroups.count) duplicate files moved to Trash", systemImage: "trash")
-                    Label("\(folderGroup.uniqueToB.count) unique files moved into \(nameA)", systemImage: "arrow.right.doc.on.clipboard")
+                    Label("\(mergeComposition(folderGroup).removedCount) duplicate file(s) moved to Trash", systemImage: "trash")
+                    Label("\(folderGroup.uniqueToB.count) unique file(s) moved into \(nameA)", systemImage: "arrow.right.doc.on.clipboard")
                     Label("\"\(nameB)\" deleted after merge", systemImage: "folder.badge.minus")
                 }
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
             }
+
+            MergePieChart(composition: mergeComposition(folderGroup))
 
             Divider()
 
