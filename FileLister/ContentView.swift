@@ -108,7 +108,7 @@ struct SelectionButton: View {
 
 enum ScanSource: String, CaseIterable, Identifiable {
     case local = "Local"
-    case oneDrive = "OneDrive"
+    case remote = "Remote"
     var id: String { rawValue }
     var icon: String { self == .local ? "internaldrive" : "cloud" }
 }
@@ -134,9 +134,17 @@ struct ContentView: View {
     // The scanner for the current mode (Folders uses its own; everything else uses the file scanner).
     private var scanner: FileScanner { mode == .folders ? folderScanner : fileScanner }
     @StateObject private var photoEngine = PhotoEngine()
-    @StateObject private var oneDrive = OneDriveAuth()
-    @StateObject private var oneDriveEngine = OneDriveEngine()
+    // Active remote provider (OneDrive in Phase 1) + the provider-agnostic engine that
+    // wraps it. Created together so the engine and the UI share one provider instance.
+    @StateObject private var remoteProvider: OneDriveProvider
+    @StateObject private var remoteEngine: RemoteEngine
     @EnvironmentObject var licenseManager: LicenseManager
+
+    init() {
+        let provider = OneDriveProvider()
+        _remoteProvider = StateObject(wrappedValue: provider)
+        _remoteEngine = StateObject(wrappedValue: RemoteEngine(provider: provider))
+    }
     @State private var mode: AppMode = .files
     @State private var source: ScanSource = .local
     @State private var selectedCloudFolders: [CloudFolder] = []
@@ -144,7 +152,7 @@ struct ContentView: View {
 
     // True when the engine for the active source/mode is scanning
     private var activeScanning: Bool {
-        if source == .oneDrive { return oneDriveEngine.isScanning }
+        if source == .remote { return remoteEngine.isScanning }
         return mode == .photos ? photoEngine.isScanning : scanner.isScanning
     }
     // Folder selection is per-mode, so each mode's bar matches its own results.
@@ -176,6 +184,13 @@ struct ContentView: View {
     // OneDrive folder merge (mirror of the local flow above)
     @State private var previewCloudCluster: CloudFolderDupGroup? = nil
     @State private var showingCloudMergeAllSheet = false
+    // OneDrive "Copy to new folder" — destination parent chosen when the toggle is enabled
+    @State private var showingCloudDestPicker = false
+    @State private var cloudSafeMergeDestination: CloudFolder? = nil
+    // Non-nil only when safe merge is active with a destination — drives copy-mode confirmation sheets.
+    private var cloudCopyDestinationName: String? {
+        remoteEngine.safeMergeToNewFolder ? cloudSafeMergeDestination?.name : nil
+    }
     @State private var cloudWalkthroughActive = false
     @State private var cloudWalkthroughQueue: [CloudFolderDupGroup] = []
     @State private var cloudWalkthroughIndex = 0
@@ -210,7 +225,7 @@ struct ContentView: View {
     // True when the Actions row has anything to show (merge controls or Clean All).
     var hasActionControls: Bool {
         let localMerge = !shownFolderGroups.isEmpty && !scanner.isScanning
-        let cloudMerge = source == .oneDrive && mode == .folders && !oneDriveEngine.folderGroups.isEmpty && !oneDriveEngine.isScanning
+        let cloudMerge = source == .remote && mode == .folders && !remoteEngine.folderGroups.isEmpty && !remoteEngine.isScanning
         let cleanAll = hasRemovableDuplicates && !scanner.isScanning
         return localMerge || cloudMerge || cleanAll
     }
@@ -249,7 +264,7 @@ struct ContentView: View {
 
             // Top Bar
             HStack(spacing: 12) {
-                let searchDisabled = source == .oneDrive ? (!oneDrive.isConnected || (selectedCloudFolders.isEmpty && !oneDriveEngine.isScanning)) : (sourceFolders.isEmpty && !activeScanning)
+                let searchDisabled = source == .remote ? (!remoteProvider.isConnected || (selectedCloudFolders.isEmpty && !remoteEngine.isScanning)) : (sourceFolders.isEmpty && !activeScanning)
                 Button(action: { startScanning() }) {
                     HStack {
                         Image(systemName: activeScanning ? "stop.circle.fill" : "magnifyingglass.circle.fill")
@@ -317,10 +332,10 @@ struct ContentView: View {
                 } else {
                     // OneDrive connection / folder panel
                     HStack(spacing: 8) {
-                        Image(systemName: oneDrive.isConnected ? "cloud.fill" : "cloud").foregroundColor(oneDrive.isConnected ? .blue : .secondary)
-                        if oneDrive.isConnected {
+                        Image(systemName: remoteProvider.isConnected ? "cloud.fill" : "cloud").foregroundColor(remoteProvider.isConnected ? .blue : .secondary)
+                        if remoteProvider.isConnected {
                             if selectedCloudFolders.isEmpty {
-                                Text("\(oneDrive.accountName) — no folders selected").font(.system(size: 11)).foregroundColor(.secondary)
+                                Text("\(remoteProvider.accountLabel) — no folders selected").font(.system(size: 11)).foregroundColor(.secondary)
                             } else {
                                 ScrollView(.horizontal, showsIndicators: false) {
                                     HStack(spacing: 6) {
@@ -330,7 +345,7 @@ struct ContentView: View {
                                                 Text(f.name).font(.system(size: 10)).lineLimit(1).help(f.path)
                                                 Button(action: { selectedCloudFolders.removeAll { $0 == f } }) {
                                                     Image(systemName: "xmark.circle.fill").font(.system(size: 9)).foregroundColor(.secondary)
-                                                }.buttonStyle(.plain).disabled(oneDriveEngine.isScanning)
+                                                }.buttonStyle(.plain).disabled(remoteEngine.isScanning)
                                             }
                                             .padding(.horizontal, 6).padding(.vertical, 3)
                                             .background(Color.blue.opacity(0.08)).cornerRadius(4)
@@ -340,28 +355,37 @@ struct ContentView: View {
                             }
                             Spacer(minLength: 0)
                             Button("Add Folder…") { showingCloudPicker = true }
-                                .buttonStyle(.bordered).controlSize(.small).disabled(oneDriveEngine.isScanning)
-                            Button("Sign Out") { oneDrive.disconnect(); selectedCloudFolders = [] }
+                                .buttonStyle(.bordered).controlSize(.small).disabled(remoteEngine.isScanning)
+                            Button("Sign Out") { remoteProvider.disconnect(); selectedCloudFolders = [] }
                                 .buttonStyle(.bordered).controlSize(.small)
                         } else {
                             Text("Not connected").font(.system(size: 11)).foregroundColor(.secondary)
                             Spacer(minLength: 0)
-                            Button("Connect OneDrive…") { oneDrive.connect() }
+                            Button("Connect OneDrive…") { remoteProvider.connect() }
                                 .buttonStyle(.bordered).controlSize(.small)
                         }
                     }
                     .padding(.horizontal, 10).frame(height: 32)
                     .background(Color(NSColor.controlBackgroundColor))
                     .cornerRadius(6).overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.2), lineWidth: 1))
-                    .onChange(of: oneDrive.isConnected) { connected in
-                        if connected && source == .oneDrive && selectedCloudFolders.isEmpty {
+                    .onChange(of: remoteProvider.isConnected) { connected in
+                        if connected && source == .remote && selectedCloudFolders.isEmpty {
                             showingCloudPicker = true
                         }
                     }
                     .sheet(isPresented: $showingCloudPicker) {
-                        CloudFolderPickerSheet(engine: oneDriveEngine, auth: oneDrive,
+                        CloudFolderPickerSheet(engine: remoteEngine,
                                                selected: $selectedCloudFolders,
                                                onClose: { showingCloudPicker = false })
+                    }
+                    .sheet(isPresented: $showingCloudDestPicker) {
+                        CloudFolderPickerSheet(engine: remoteEngine,
+                                               selected: .constant([]),
+                                               onPick: { cloudSafeMergeDestination = $0 },
+                                               onClose: {
+                                                   showingCloudDestPicker = false
+                                                   if cloudSafeMergeDestination == nil { remoteEngine.safeMergeToNewFolder = false }
+                                               })
                     }
                 }
             }
@@ -503,12 +527,34 @@ struct ContentView: View {
                 }
 
                 // OneDrive folder-merge controls (mirror local Folders mode)
-                if source == .oneDrive && mode == .folders && !oneDriveEngine.folderGroups.isEmpty && !oneDriveEngine.isScanning {
-                    Toggle(isOn: $oneDriveEngine.renameKeptFolder) {
-                        Label("Rename kept folder", systemImage: "pencil").font(.system(size: 10))
+                if source == .remote && mode == .folders && !remoteEngine.folderGroups.isEmpty && !remoteEngine.isScanning {
+                    Toggle(isOn: $remoteEngine.safeMergeToNewFolder) {
+                        Label("Copy to new folder", systemImage: "doc.on.doc").font(.system(size: 10))
                     }
                     .toggleStyle(.checkbox)
-                    .help("When on, the kept folder is renamed with the merged tag. When off, it keeps its original name and just gains the merged files.")
+                    .help("Keep originals untouched — copy the merged result into a new OneDrive folder you choose")
+                    .onChange(of: remoteEngine.safeMergeToNewFolder) { on in
+                        if on { showingCloudDestPicker = true } else { cloudSafeMergeDestination = nil }
+                    }
+                    if remoteEngine.safeMergeToNewFolder, let dest = cloudSafeMergeDestination {
+                        Button(action: { showingCloudDestPicker = true }) {
+                            HStack(spacing: 3) {
+                                Image(systemName: "arrow.right").font(.system(size: 8))
+                                Text(dest.name).font(.system(size: 10, weight: .medium))
+                            }
+                            .foregroundColor(.green)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Merged copies are created inside \(dest.path). Click to change.")
+                    }
+
+                    if !remoteEngine.safeMergeToNewFolder {
+                        Toggle(isOn: $remoteEngine.renameKeptFolder) {
+                            Label("Rename kept folder", systemImage: "pencil").font(.system(size: 10))
+                        }
+                        .toggleStyle(.checkbox)
+                        .help("When on, the kept folder is renamed with the merged tag. When off, it keeps its original name and just gains the merged files.")
+                    }
 
                     Picker("", selection: $folderScanner.logLocationMode) {
                         Text("Log: App folder").tag(LogLocationMode.appFolder)
@@ -517,7 +563,7 @@ struct ContentView: View {
                     .pickerStyle(.menu).frame(width: 150)
                     .help("Where the merge log (JSON + HTML) is saved after each merge.")
 
-                    if let logURL = oneDriveEngine.lastLogURL {
+                    if let logURL = remoteEngine.lastLogURL {
                         Button(action: { NSWorkspace.shared.activateFileViewerSelecting([logURL]) }) {
                             Label("Reveal Log", systemImage: "doc.text.magnifyingglass").font(.system(size: 10))
                         }
@@ -558,7 +604,7 @@ struct ContentView: View {
                     .buttonStyle(.plain)
                 }
 
-                if source == .oneDrive && mode == .folders && !oneDriveEngine.folderGroups.isEmpty && !oneDriveEngine.isScanning {
+                if source == .remote && mode == .folders && !remoteEngine.folderGroups.isEmpty && !remoteEngine.isScanning {
                     Button(action: { startCloudWalkthrough() }) {
                         HStack(spacing: 4) {
                             Image(systemName: "rectangle.stack.badge.play")
@@ -574,8 +620,8 @@ struct ContentView: View {
 
                     Button(action: { showingCloudMergeAllSheet = true }) {
                         HStack(spacing: 4) {
-                            Image(systemName: "arrow.triangle.merge")
-                            Text("Merge All Folders")
+                            Image(systemName: remoteEngine.safeMergeToNewFolder ? "doc.on.doc" : "arrow.triangle.merge")
+                            Text(remoteEngine.safeMergeToNewFolder ? "Merge All to New" : "Merge All Folders")
                         }
                         .font(.system(size: 10, weight: .bold)).foregroundColor(.indigo)
                         .frame(width: 150, height: 24)
@@ -628,30 +674,30 @@ struct ContentView: View {
             }
 
             // Duplicates List
-            if source == .oneDrive {
-                if oneDrive.isConnected && mode == .files && (!selectedCloudFolders.isEmpty || !oneDriveEngine.groups.isEmpty) {
-                    CloudFilesView(engine: oneDriveEngine, auth: oneDrive, selectedCloudID: $selectedCloudID)
-                } else if oneDrive.isConnected && mode == .folders && (!selectedCloudFolders.isEmpty || !oneDriveEngine.folderGroups.isEmpty) {
-                    CloudFoldersView(engine: oneDriveEngine, auth: oneDrive, selectedCloudID: $selectedCloudID,
+            if source == .remote {
+                if remoteProvider.isConnected && mode == .files && (!selectedCloudFolders.isEmpty || !remoteEngine.groups.isEmpty) {
+                    CloudFilesView(engine: remoteEngine, selectedCloudID: $selectedCloudID)
+                } else if remoteProvider.isConnected && mode == .folders && (!selectedCloudFolders.isEmpty || !remoteEngine.folderGroups.isEmpty) {
+                    CloudFoldersView(engine: remoteEngine, selectedCloudID: $selectedCloudID,
                                      onMergeCluster: { previewCloudCluster = $0 })
                 } else {
                     Spacer()
                     VStack(spacing: 12) {
                         Image(systemName: "cloud").font(.system(size: 48)).foregroundColor(.gray.opacity(0.25))
-                        Text(oneDrive.isConnected ? "OneDrive — \(mode.rawValue)" : "OneDrive")
+                        Text(remoteProvider.isConnected ? "OneDrive — \(mode.rawValue)" : "OneDrive")
                             .font(.title3).fontWeight(.semibold)
-                        Text(oneDrive.isConnected
+                        Text(remoteProvider.isConnected
                              ? ((mode == .files || mode == .folders)
                                 ? "Add one or more OneDrive folders, then press Search."
                                 : "Duplicate \(mode.rawValue.lowercased()) on OneDrive arrives in a later update.")
                              : "Connect your OneDrive account to scan it for duplicates.")
                             .font(.caption).foregroundColor(.secondary).multilineTextAlignment(.center)
-                        if oneDrive.isConnected && (mode == .files || mode == .folders) && selectedCloudFolders.isEmpty {
+                        if remoteProvider.isConnected && (mode == .files || mode == .folders) && selectedCloudFolders.isEmpty {
                             Button("Add OneDrive Folder…") { showingCloudPicker = true }
                                 .controlSize(.small)
                         }
-                        if !oneDrive.status.isEmpty {
-                            Text(oneDrive.status).font(.caption2).foregroundColor(.secondary)
+                        if !remoteProvider.statusMessage.isEmpty {
+                            Text(remoteProvider.statusMessage).font(.caption2).foregroundColor(.secondary)
                         }
                     }
                     Spacer()
@@ -709,8 +755,8 @@ struct ContentView: View {
             
             // Hidden Button for Keyboard Shortcut (Space)
             Button("") {
-                if source == .oneDrive {
-                    if let f = selectedCloudFile { oneDriveEngine.preview(f, auth: oneDrive) }
+                if source == .remote {
+                    if let f = selectedCloudFile { remoteEngine.preview(f) }
                 } else if mode == .photos {
                     if let p = selectedPhoto { QuickLookManager.shared.togglePreview(url: URL(fileURLWithPath: p.fullPath)) }
                 } else if let file = selectedFile {
@@ -724,19 +770,19 @@ struct ContentView: View {
             .opacity(0)
             .frame(width: 0, height: 0)
 
-            Button("") { if source == .oneDrive { navigateCloud(by: -1) } else if mode == .photos { navigatePhoto(by: -1) } else { navigateFolderGroup(by: -1) } }
+            Button("") { if source == .remote { navigateCloud(by: -1) } else if mode == .photos { navigatePhoto(by: -1) } else { navigateFolderGroup(by: -1) } }
                 .keyboardShortcut(.upArrow, modifiers: [])
                 .opacity(0).frame(width: 0, height: 0)
 
-            Button("") { if source == .oneDrive { navigateCloud(by: 1) } else if mode == .photos { navigatePhoto(by: 1) } else { navigateFolderGroup(by: 1) } }
+            Button("") { if source == .remote { navigateCloud(by: 1) } else if mode == .photos { navigatePhoto(by: 1) } else { navigateFolderGroup(by: 1) } }
                 .keyboardShortcut(.downArrow, modifiers: [])
                 .opacity(0).frame(width: 0, height: 0)
 
-            Button("") { if source == .oneDrive { navigateCloud(by: -1) } else if mode == .photos { navigatePhoto(by: -1) } }
+            Button("") { if source == .remote { navigateCloud(by: -1) } else if mode == .photos { navigatePhoto(by: -1) } }
                 .keyboardShortcut(.leftArrow, modifiers: [])
                 .opacity(0).frame(width: 0, height: 0)
 
-            Button("") { if source == .oneDrive { navigateCloud(by: 1) } else if mode == .photos { navigatePhoto(by: 1) } }
+            Button("") { if source == .remote { navigateCloud(by: 1) } else if mode == .photos { navigatePhoto(by: 1) } }
                 .keyboardShortcut(.rightArrow, modifiers: [])
                 .opacity(0).frame(width: 0, height: 0)
 
@@ -860,10 +906,11 @@ struct ContentView: View {
         .sheet(item: $previewCloudCluster) { cluster in
             if cloudWalkthroughActive && cloudWalkthroughIndex < cloudWalkthroughQueue.count {
                 CloudClusterSheet(
-                    engine: oneDriveEngine, auth: oneDrive,
+                    engine: remoteEngine,
                     cluster: cloudWalkthroughQueue[cloudWalkthroughIndex],
                     selectedCloudID: $selectedCloudID,
                     progressLabel: "Cluster \(cloudWalkthroughIndex + 1) of \(cloudWalkthroughQueue.count)",
+                    copyDestinationName: cloudCopyDestinationName,
                     onApproveNext: { approveAndAdvanceCloud() },
                     onSkip: { advanceCloudWalkthrough() },
                     onClose: { cancelCloudWalkthrough() }
@@ -871,11 +918,13 @@ struct ContentView: View {
                 .id(cloudWalkthroughIndex)
             } else {
                 CloudClusterSheet(
-                    engine: oneDriveEngine, auth: oneDrive,
+                    engine: remoteEngine,
                     cluster: cluster, selectedCloudID: $selectedCloudID,
+                    copyDestinationName: cloudCopyDestinationName,
                     onMerge: {
                         previewCloudCluster = nil
-                        mergeCloud([cluster])
+                        if remoteEngine.safeMergeToNewFolder { safeMergeCloudSingle(cluster) }
+                        else { mergeCloud([cluster]) }
                     },
                     onClose: { previewCloudCluster = nil }
                 )
@@ -883,10 +932,12 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingCloudMergeAllSheet) {
             CloudMergeAllSheet(
-                engine: oneDriveEngine, scanner: scanner,
+                engine: remoteEngine, scanner: scanner,
+                copyDestinationName: cloudCopyDestinationName,
                 onMergeAll: {
                     showingCloudMergeAllSheet = false
-                    mergeCloud(oneDriveEngine.folderGroups)
+                    if remoteEngine.safeMergeToNewFolder { safeMergeCloudBatch(remoteEngine.folderGroups) }
+                    else { mergeCloud(remoteEngine.folderGroups) }
                 },
                 onCancel: { showingCloudMergeAllSheet = false }
             )
@@ -969,7 +1020,7 @@ struct ContentView: View {
 
     // Cloud (OneDrive) navigation — flattened over all groups, skipping deleted files
     private var cloudOrder: [CloudFileInfo] {
-        oneDriveEngine.displayGroups.flatMap { $0.files.filter { !oneDriveEngine.deletedIDs.contains($0.id) } }
+        remoteEngine.displayGroups.flatMap { $0.files.filter { !remoteEngine.deletedIDs.contains($0.id) } }
     }
     private var selectedCloudFile: CloudFileInfo? { cloudOrder.first { $0.id == selectedCloudID } }
 
@@ -982,7 +1033,7 @@ struct ContentView: View {
         selectedCloudID = next.id
         // If Quick Look is open, flip to the newly selected cloud file (downloads it)
         if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared()?.isVisible == true {
-            oneDriveEngine.preview(next, auth: oneDrive)
+            remoteEngine.preview(next)
         }
     }
 
@@ -1243,15 +1294,15 @@ struct ContentView: View {
     }
 
     private func startScanning() {
-        if source == .oneDrive {
-            if oneDriveEngine.isScanning { oneDriveEngine.stop(); return }
-            guard oneDrive.isConnected, !selectedCloudFolders.isEmpty else { return }
+        if source == .remote {
+            if remoteEngine.isScanning { remoteEngine.stop(); return }
+            guard remoteProvider.isConnected, !selectedCloudFolders.isEmpty else { return }
             if mode == .files {
-                oneDriveEngine.scan(auth: oneDrive, folders: selectedCloudFolders)
+                remoteEngine.scan(folders: selectedCloudFolders)
             } else if mode == .folders {
-                oneDriveEngine.scan(auth: oneDrive, folders: selectedCloudFolders, folderMode: true)
+                remoteEngine.scan(folders: selectedCloudFolders, folderMode: true)
             } else {
-                oneDrive.status = "OneDrive \(mode.rawValue) scanning arrives in a later update."
+                remoteProvider.statusMessage = "OneDrive \(mode.rawValue) scanning arrives in a later update."
             }
             return
         }
@@ -1329,14 +1380,13 @@ struct ContentView: View {
     // MARK: - OneDrive folder merge + walkthrough
 
     private func mergeCloud(_ groups: [CloudFolderDupGroup]) {
-        oneDriveEngine.mergeFolders(groups,
+        remoteEngine.mergeFolders(groups,
             mergedName: { a, b in scanner.computeMergedFolderName(folderA: a, folderB: b) },
-            logDir: resolveLogDirectory(),
-            auth: oneDrive)
+            logDir: resolveLogDirectory())
     }
 
     private func startCloudWalkthrough() {
-        cloudWalkthroughQueue = oneDriveEngine.folderGroups
+        cloudWalkthroughQueue = remoteEngine.folderGroups
         guard let first = cloudWalkthroughQueue.first else { return }
         cloudWalkthroughIndex = 0
         approvedCloudIDs = []
@@ -1360,7 +1410,20 @@ struct ContentView: View {
         previewCloudCluster = nil
         let approved = cloudWalkthroughQueue.filter { approvedCloudIDs.contains($0.id) }
         guard !approved.isEmpty else { return }
-        mergeCloud(approved)
+        if remoteEngine.safeMergeToNewFolder { safeMergeCloudBatch(approved) }
+        else { mergeCloud(approved) }
+    }
+
+    // MARK: - OneDrive safe merge (copy to a new OneDrive folder chosen via the toggle)
+
+    private func safeMergeCloudSingle(_ g: CloudFolderDupGroup) { safeMergeCloudBatch([g]) }
+
+    private func safeMergeCloudBatch(_ groups: [CloudFolderDupGroup]) {
+        guard !groups.isEmpty else { return }
+        guard let dest = cloudSafeMergeDestination else { showingCloudDestPicker = true; return }
+        remoteEngine.safeMergeFolders(groups, intoParent: dest.id,
+            mergedName: { a, b in scanner.computeMergedFolderName(folderA: a, folderB: b) },
+            logDir: resolveLogDirectory())
     }
 
     private func cancelCloudWalkthrough() {

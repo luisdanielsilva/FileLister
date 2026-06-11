@@ -3,8 +3,7 @@ import SwiftUI
 // OneDrive Folders mode (detection only): shows clusters of folders that share
 // most of their content, with per-file / per-group delete reused from Files mode.
 struct CloudFoldersView: View {
-    @ObservedObject var engine: OneDriveEngine
-    @ObservedObject var auth: OneDriveAuth
+    @ObservedObject var engine: RemoteEngine
     @Binding var selectedCloudID: String?
     var onMergeCluster: (CloudFolderDupGroup) -> Void
     @State private var collapsedClusterIDs: Set<UUID> = []
@@ -39,7 +38,7 @@ struct CloudFoldersView: View {
                             Label("Reveal Log", systemImage: "doc.text.magnifyingglass").font(.system(size: 10))
                         }.buttonStyle(.bordered).controlSize(.small)
                     }
-                    Button(action: { engine.deleteAllFolders(auth: auth) }) {
+                    Button(action: { engine.deleteAllFolders() }) {
                         Label("Delete all duplicates", systemImage: "trash").font(.system(size: 10, weight: .bold))
                     }.buttonStyle(.bordered).controlSize(.small)
                 }
@@ -87,7 +86,10 @@ struct CloudFoldersView: View {
                 .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.green.opacity(0.4), lineWidth: 1))
 
                 Button(action: { onMergeCluster(cluster) }) {
-                    HStack(spacing: 4) { Image(systemName: "arrow.triangle.merge"); Text("Merge & Clean") }
+                    HStack(spacing: 4) {
+                        Image(systemName: engine.safeMergeToNewFolder ? "doc.on.doc" : "arrow.triangle.merge")
+                        Text(engine.safeMergeToNewFolder ? "Merge to New" : "Merge & Clean")
+                    }
                         .font(.system(size: 10, weight: .bold)).foregroundColor(.indigo)
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(Color.indigo.opacity(0.08)).cornerRadius(5)
@@ -118,7 +120,7 @@ struct CloudFoldersView: View {
 
             // Shared content (per-group / per-file delete reused from Files mode).
             ForEach(cluster.matchedGroups) { group in
-                CloudGroupCard(engine: engine, auth: auth, group: group, selectedCloudID: $selectedCloudID)
+                CloudGroupCard(engine: engine, group: group, selectedCloudID: $selectedCloudID)
             }
             }
         }

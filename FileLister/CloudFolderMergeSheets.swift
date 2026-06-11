@@ -3,24 +3,25 @@ import SwiftUI
 // Preview + confirm for a single OneDrive folder cluster. Reused for the
 // "Review One-by-One" walkthrough (when the walkthrough callbacks are supplied).
 struct CloudClusterSheet: View {
-    @ObservedObject var engine: OneDriveEngine
-    @ObservedObject var auth: OneDriveAuth
+    @ObservedObject var engine: RemoteEngine
     let cluster: CloudFolderDupGroup
     @Binding var selectedCloudID: String?
     var progressLabel: String? = nil
+    var copyDestinationName: String? = nil  // set → "copy to new folder" (originals kept) mode
     var onMerge: (() -> Void)? = nil        // single-cluster mode
     var onApproveNext: (() -> Void)? = nil  // walkthrough mode
     var onSkip: (() -> Void)? = nil         // walkthrough mode
     let onClose: () -> Void
 
     private var isWalkthrough: Bool { onApproveNext != nil }
+    private var isCopy: Bool { copyDestinationName != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             // Header
             HStack(spacing: 8) {
-                Image(systemName: "arrow.triangle.merge").font(.title2).foregroundColor(.indigo)
-                Text("Merge Folder Cluster").font(.title2).fontWeight(.bold)
+                Image(systemName: isCopy ? "doc.on.doc" : "arrow.triangle.merge").font(.title2).foregroundColor(.indigo)
+                Text(isCopy ? "Copy Merged Folder" : "Merge Folder Cluster").font(.title2).fontWeight(.bold)
                 Spacer()
                 if let label = progressLabel {
                     Text(label).font(.system(size: 11)).foregroundColor(.secondary)
@@ -42,21 +43,28 @@ struct CloudClusterSheet: View {
                 }
                 ForEach(cluster.otherFolders, id: \.self) { other in
                     HStack(spacing: 6) {
-                        Image(systemName: "trash").foregroundColor(.red).font(.system(size: 10))
+                        Image(systemName: isCopy ? "folder" : "trash").foregroundColor(isCopy ? .secondary : .red).font(.system(size: 10))
                         Text(other).font(.system(size: 11, design: .monospaced)).foregroundColor(.secondary)
                             .lineLimit(1).truncationMode(.middle)
                     }
                 }
-                Text("\(cluster.otherFolders.count) folder(s) → OneDrive recycle bin")
+                Text(isCopy
+                     ? "Originals kept · merged copy written to \"\(copyDestinationName ?? "")\""
+                     : "\(cluster.otherFolders.count) folder(s) → OneDrive recycle bin")
                     .font(.system(size: 9)).foregroundColor(.secondary)
             }
 
             // What the merge does.
             HStack(spacing: 16) {
-                Label("\(cluster.filesToMove.count) unique file(s) moved into keep", systemImage: "arrow.right.doc.on.clipboard")
+                Label(isCopy
+                      ? "\(cluster.filesToMove.count) file(s) copied into the new folder"
+                      : "\(cluster.filesToMove.count) unique file(s) moved into keep",
+                      systemImage: "arrow.right.doc.on.clipboard")
                     .font(.system(size: 10)).foregroundColor(.blue)
-                Label("Save \(cloudByteString(cluster.reclaimable(excluding: engine.deletedIDs)))", systemImage: "internaldrive")
-                    .font(.system(size: 10)).foregroundColor(.green)
+                if !isCopy {
+                    Label("Save \(cloudByteString(cluster.reclaimable(excluding: engine.deletedIDs)))", systemImage: "internaldrive")
+                        .font(.system(size: 10)).foregroundColor(.green)
+                }
             }
 
             MergePieChart(composition: mergeComposition(cluster))
@@ -66,7 +74,7 @@ struct CloudClusterSheet: View {
             ScrollView {
                 LazyVStack(spacing: 8) {
                     if !cluster.filesToMove.isEmpty {
-                        Text("Unique files moved into keep").font(.system(size: 11, weight: .semibold)).frame(maxWidth: .infinity, alignment: .leading)
+                        Text(isCopy ? "Files copied into the new folder" : "Unique files moved into keep").font(.system(size: 11, weight: .semibold)).frame(maxWidth: .infinity, alignment: .leading)
                         ForEach(cluster.filesToMove) { f in
                             HStack(spacing: 6) {
                                 Image(systemName: "doc").font(.system(size: 9)).foregroundColor(.blue.opacity(0.6))
@@ -77,10 +85,10 @@ struct CloudClusterSheet: View {
                             .padding(.horizontal, 6)
                         }
                     }
-                    if !cluster.matchedGroups.isEmpty {
+                    if !isCopy && !cluster.matchedGroups.isEmpty {
                         Text("Duplicate content removed").font(.system(size: 11, weight: .semibold)).frame(maxWidth: .infinity, alignment: .leading)
                         ForEach(cluster.matchedGroups) { group in
-                            CloudGroupCard(engine: engine, auth: auth, group: group, selectedCloudID: $selectedCloudID)
+                            CloudGroupCard(engine: engine, group: group, selectedCloudID: $selectedCloudID)
                         }
                     }
                 }
@@ -103,7 +111,10 @@ struct CloudClusterSheet: View {
                     }.buttonStyle(.plain)
                 } else {
                     Button(action: { onMerge?() }) {
-                        HStack(spacing: 6) { Image(systemName: "arrow.triangle.merge"); Text("Merge & Clean") }
+                        HStack(spacing: 6) {
+                            Image(systemName: isCopy ? "doc.on.doc" : "arrow.triangle.merge")
+                            Text(isCopy ? "Copy to New Folder" : "Merge & Clean")
+                        }
                             .fontWeight(.semibold).foregroundColor(.white)
                             .padding(.horizontal, 16).padding(.vertical, 8)
                             .background(Color.indigo).cornerRadius(8)
@@ -119,16 +130,19 @@ struct CloudClusterSheet: View {
 // Confirm merging every detected OneDrive folder cluster, with the shared
 // naming rule (reused from the local scanner) applied when renaming is on.
 struct CloudMergeAllSheet: View {
-    @ObservedObject var engine: OneDriveEngine
+    @ObservedObject var engine: RemoteEngine
     @ObservedObject var scanner: FileScanner
+    var copyDestinationName: String? = nil   // set → "copy to new folder" (originals kept) mode
     let onMergeAll: () -> Void
     let onCancel: () -> Void
+
+    private var isCopy: Bool { copyDestinationName != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack(spacing: 8) {
-                Image(systemName: "arrow.triangle.merge").font(.title2).foregroundColor(.indigo)
-                Text("Merge All Folder Clusters").font(.title2).fontWeight(.bold)
+                Image(systemName: isCopy ? "doc.on.doc" : "arrow.triangle.merge").font(.title2).foregroundColor(.indigo)
+                Text(isCopy ? "Copy All Merged Folders" : "Merge All Folder Clusters").font(.title2).fontWeight(.bold)
                 Spacer()
                 Text("\(engine.folderGroups.count) clusters")
                     .font(.system(size: 11)).foregroundColor(.secondary)
@@ -206,7 +220,9 @@ struct CloudMergeAllSheet: View {
             }
             .frame(maxHeight: 220)
 
-            Text("Other folders in each cluster move to the OneDrive recycle bin after their unique files are merged into the kept folder.")
+            Text(isCopy
+                 ? "A new merged folder is created for each cluster inside \"\(copyDestinationName ?? "")\". Originals are kept untouched — nothing is recycled."
+                 : "Other folders in each cluster move to the OneDrive recycle bin after their unique files are merged into the kept folder.")
                 .font(.system(size: 10)).foregroundColor(.secondary)
 
             Divider()
@@ -215,7 +231,10 @@ struct CloudMergeAllSheet: View {
                 Button("Cancel", action: onCancel).buttonStyle(.bordered)
                 Spacer()
                 Button(action: onMergeAll) {
-                    HStack(spacing: 6) { Image(systemName: "arrow.triangle.merge"); Text("Merge All & Clean") }
+                    HStack(spacing: 6) {
+                        Image(systemName: isCopy ? "doc.on.doc" : "arrow.triangle.merge")
+                        Text(isCopy ? "Copy All to New Folder" : "Merge All & Clean")
+                    }
                         .fontWeight(.semibold).foregroundColor(.white)
                         .padding(.horizontal, 16).padding(.vertical, 8)
                         .background(Color.indigo).cornerRadius(8)

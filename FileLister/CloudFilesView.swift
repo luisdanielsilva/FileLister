@@ -16,8 +16,7 @@ struct ProgressRing: View {
 }
 
 struct CloudFilesView: View {
-    @ObservedObject var engine: OneDriveEngine
-    @ObservedObject var auth: OneDriveAuth
+    @ObservedObject var engine: RemoteEngine
     @Binding var selectedCloudID: String?
 
     var body: some View {
@@ -50,7 +49,7 @@ struct CloudFilesView: View {
                             Label("Reveal Log", systemImage: "doc.text.magnifyingglass").font(.system(size: 10))
                         }.buttonStyle(.bordered).controlSize(.small)
                     }
-                    Button(action: { engine.deleteAll(auth: auth) }) {
+                    Button(action: { engine.deleteAll() }) {
                         Label("Delete all duplicates", systemImage: "trash").font(.system(size: 10, weight: .bold))
                     }.buttonStyle(.bordered).controlSize(.small)
                 }
@@ -59,7 +58,7 @@ struct CloudFilesView: View {
                 ScrollView {
                     LazyVStack(spacing: 8) {
                         ForEach(engine.groups) { group in
-                            CloudGroupCard(engine: engine, auth: auth, group: group, selectedCloudID: $selectedCloudID)
+                            CloudGroupCard(engine: engine, group: group, selectedCloudID: $selectedCloudID)
                         }
                     }
                     .padding(.horizontal)
@@ -73,8 +72,7 @@ struct CloudFilesView: View {
 // One duplicate-content group: header (save/copies/delete) + per-file rows.
 // Shared by the Files view and the Folders (cluster) view.
 struct CloudGroupCard: View {
-    @ObservedObject var engine: OneDriveEngine
-    @ObservedObject var auth: OneDriveAuth
+    @ObservedObject var engine: RemoteEngine
     let group: CloudDupGroup
     @Binding var selectedCloudID: String?
 
@@ -97,7 +95,7 @@ struct CloudGroupCard: View {
                     .padding(.horizontal, 5).padding(.vertical, 1)
                     .background(live.count > 1 ? Color.blue.opacity(0.1) : Color.green.opacity(0.1))
                     .foregroundColor(live.count > 1 ? .blue : .green).cornerRadius(3)
-                Button(action: { engine.deleteDuplicates(in: group, auth: auth) }) {
+                Button(action: { engine.deleteDuplicates(in: group) }) {
                     HStack(spacing: 4) { Image(systemName: "trash"); Text("Delete dupes") }
                         .font(.system(size: 10, weight: .bold)).foregroundColor(.red)
                         .padding(.horizontal, 8).padding(.vertical, 3)
@@ -129,7 +127,7 @@ struct CloudGroupCard: View {
                                 Image(systemName: "arrow.up.forward.square").font(.system(size: 9)).foregroundColor(.gray)
                             }.buttonStyle(.plain).help("Open in OneDrive")
                         }
-                        Button(action: { engine.deleteFile(file, in: group, auth: auth) }) {
+                        Button(action: { engine.deleteFile(file, in: group) }) {
                             Image(systemName: live.count > 1 ? "trash" : "lock.fill")
                                 .font(.system(size: 9)).foregroundColor(live.count > 1 ? .red : .green.opacity(0.5))
                         }

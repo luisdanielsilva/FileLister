@@ -52,7 +52,7 @@ struct CloudFolderDupGroup: Identifiable {
 }
 
 @MainActor
-final class OneDriveEngine: ObservableObject {
+final class RemoteEngine: ObservableObject {
     @Published var isScanning = false
     @Published var progress = 0.0
     @Published var status = "Connect and search to find duplicates in OneDrive."
@@ -66,8 +66,17 @@ final class OneDriveEngine: ObservableObject {
     private let folderMatchThreshold = 0.75
     private var folderPathToID: [String: String] = [:]   // display path → drive item id (for folder merge)
 
+    // The active remote backend (OneDrive in Phase 1). Used for auth tokens; listing,
+    // crawl, and mutations still build Graph requests directly until issue #8.
+    let provider: any RemoteProvider
+
+    init(provider: any RemoteProvider) {
+        self.provider = provider
+    }
+
     // Merge controls (mirror local Folders mode).
     @Published var renameKeptFolder = false
+    @Published var safeMergeToNewFolder = false   // copy the merged result into a new OneDrive folder, keep originals
 
     func stop() { shouldStop = true; status = "Stopping…" }
 
@@ -78,7 +87,7 @@ final class OneDriveEngine: ObservableObject {
 
     // MARK: Scan
 
-    func scan(auth: OneDriveAuth, folders: [CloudFolder], folderMode: Bool = false) {
+    func scan(folders: [CloudFolder], folderMode: Bool = false) {
         shouldStop = false
         isScanning = true
         progress = 0
@@ -91,7 +100,7 @@ final class OneDriveEngine: ObservableObject {
         for f in folders { folderPathToID[f.path] = f.id }   // seed with the selected roots
 
         Task {
-            guard let token = await auth.validAccessToken() else {
+            guard let token = await provider.validAccessToken() else {
                 self.isScanning = false; self.status = "Not connected. Please reconnect OneDrive."
                 return
             }
@@ -189,8 +198,8 @@ final class OneDriveEngine: ObservableObject {
     }
 
     // Lists child folders of a folder (nil/"root" = drive root) for the folder picker.
-    func listFolders(parentID: String?, auth: OneDriveAuth) async -> [CloudFolder] {
-        guard let token = await auth.validAccessToken() else { return [] }
+    func listFolders(parentID: String?) async -> [CloudFolder] {
+        guard let token = await provider.validAccessToken() else { return [] }
         var urlStr: String? = {
             let base = (parentID == nil || parentID == "root")
                 ? OneDriveConfig.graphBase + "/me/drive/root/children"
@@ -215,6 +224,29 @@ final class OneDriveEngine: ObservableObject {
             urlStr = json["@odata.nextLink"] as? String
         }
         return out.sorted { $0.name.lowercased() < $1.name.lowercased() }
+    }
+
+    // Create a new subfolder under `parentID` and return it (display path mirrors listFolders).
+    func createFolder(named name: String, in parentID: String?) async -> CloudFolder? {
+        guard let token = await provider.validAccessToken() else { return nil }
+        let base = (parentID == nil || parentID == "root")
+            ? OneDriveConfig.graphBase + "/me/drive/root/children"
+            : OneDriveConfig.graphBase + "/me/drive/items/\(parentID!)/children"
+        guard let url = URL(string: base) else { return nil }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = ["name": name, "folder": [:] as [String: Any],
+                                   "@microsoft.graph.conflictBehavior": "rename"]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              let http = resp as? HTTPURLResponse, (200...201).contains(http.statusCode),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let id = json["id"] as? String, let nm = json["name"] as? String else { return nil }
+        let raw = ((json["parentReference"] as? [String: Any])?["path"] as? String) ?? ""
+        let parentPath = raw.replacingOccurrences(of: "/drive/root:", with: "").removingPercentEncoding ?? raw
+        return CloudFolder(id: id, name: nm, path: parentPath + "/" + nm)
     }
 
     private func group(_ files: [CloudFileInfo]) -> [CloudDupGroup] {
@@ -349,12 +381,12 @@ final class OneDriveEngine: ObservableObject {
     @Published var previewProgress: Double = 0   // 0…1
     private var downloader: CloudDownloader?
 
-    func preview(_ file: CloudFileInfo, auth: OneDriveAuth) {
+    func preview(_ file: CloudFileInfo) {
         previewingID = file.id
         previewProgress = 0
         status = "Downloading \(file.name)…"
         Task {
-            guard let token = await auth.validAccessToken(),
+            guard let token = await provider.validAccessToken(),
                   let url = URL(string: OneDriveConfig.graphBase + "/me/drive/items/\(file.id)/content") else {
                 self.previewingID = nil
                 self.status = "Couldn't preview \(file.name)."
@@ -387,23 +419,23 @@ final class OneDriveEngine: ObservableObject {
 
     // MARK: Delete
 
-    func deleteDuplicates(in group: CloudDupGroup, auth: OneDriveAuth) {
+    func deleteDuplicates(in group: CloudDupGroup) {
         let live = group.files.filter { !deletedIDs.contains($0.id) }
         guard live.count > 1 else { return }
         let keep = live[0]
         let targets = Array(live.dropFirst())
-        delete(targets, keep: keep, auth: auth)
+        delete(targets, keep: keep)
     }
 
     // Delete a single cloud file (keeps at least one copy in the group).
-    func deleteFile(_ file: CloudFileInfo, in group: CloudDupGroup, auth: OneDriveAuth) {
+    func deleteFile(_ file: CloudFileInfo, in group: CloudDupGroup) {
         let live = group.files.filter { !deletedIDs.contains($0.id) }
         guard live.count > 1, live.contains(where: { $0.id == file.id }) else { return }
         let keep = live.first { $0.id != file.id }
-        delete([file], keep: keep, auth: auth)
+        delete([file], keep: keep)
     }
 
-    func deleteAll(auth: OneDriveAuth) {
+    func deleteAll() {
         var keepBy: [String: CloudFileInfo] = [:]
         var targets: [CloudFileInfo] = []
         for g in groups {
@@ -413,11 +445,11 @@ final class OneDriveEngine: ObservableObject {
             targets.append(contentsOf: live.dropFirst())
         }
         guard !targets.isEmpty else { return }
-        delete(targets, keep: nil, keepByHash: keepBy, auth: auth)
+        delete(targets, keep: nil, keepByHash: keepBy)
     }
 
     // Delete every removable duplicate across all detected folder clusters.
-    func deleteAllFolders(auth: OneDriveAuth) {
+    func deleteAllFolders() {
         var keepBy: [String: CloudFileInfo] = [:]
         var targets: [CloudFileInfo] = []
         for fg in folderGroups {
@@ -429,22 +461,21 @@ final class OneDriveEngine: ObservableObject {
             }
         }
         guard !targets.isEmpty else { return }
-        delete(targets, keep: nil, keepByHash: keepBy, auth: auth)
+        delete(targets, keep: nil, keepByHash: keepBy)
     }
 
     // MARK: Folder merge (in-place: move uniques into keep, recycle the other folders)
 
     func mergeFolders(_ groups: [CloudFolderDupGroup],
                       mergedName: @escaping (String, String) -> String,
-                      logDir: URL?,
-                      auth: OneDriveAuth) {
+                      logDir: URL?) {
         guard !groups.isEmpty else { return }
         let rename = renameKeptFolder
         shouldStop = false
         isScanning = true
         status = "Merging \(groups.count) folder cluster(s) in OneDrive…"
         Task {
-            guard let token = await auth.validAccessToken() else {
+            guard let token = await provider.validAccessToken() else {
                 self.isScanning = false; self.status = "Not connected."; return
             }
             var clusters: [MergeLogCluster] = []
@@ -586,19 +617,164 @@ final class OneDriveEngine: ObservableObject {
         return false
     }
 
-    private func writeMergeLog(_ clusters: [MergeLogCluster], to dir: URL?) {
+    private func writeMergeLog(_ clusters: [MergeLogCluster], to dir: URL?, mode: String = "OneDrive folder merge") {
         guard !clusters.isEmpty, let target = dir ?? MergeLogWriter.defaultAppLogDirectory() else { return }
         let report = MergeLogReport(timestamp: Date(), appVersion: MergeLogWriter.appVersion,
-                                    mode: "OneDrive folder merge", renameKeptFolder: renameKeptFolder, clusters: clusters)
+                                    mode: mode, renameKeptFolder: renameKeptFolder, clusters: clusters)
         lastLogURL = MergeLogWriter.write(report, to: target)
     }
 
-    private func delete(_ targets: [CloudFileInfo], keep: CloudFileInfo?, keepByHash: [String: CloudFileInfo] = [:], auth: OneDriveAuth) {
+    // MARK: Folder safe merge (copy to a new OneDrive folder; originals untouched)
+
+    // For each cluster, copy the keep folder's subtree into `parentID` under the merged
+    // name, then copy the cluster's unique files in (renaming on collision). Nothing is
+    // moved or recycled — the originals (and their duplicates) are left in place.
+    func safeMergeFolders(_ groups: [CloudFolderDupGroup],
+                          intoParent parentID: String,
+                          mergedName: @escaping (String, String) -> String,
+                          logDir: URL?) {
+        guard !groups.isEmpty else { return }
+        shouldStop = false
+        isScanning = true
+        status = "Creating \(groups.count) merged copy(ies) in OneDrive…"
+        Task {
+            guard let token = await provider.validAccessToken() else {
+                self.isScanning = false; self.status = "Not connected."; return
+            }
+            var clusters: [MergeLogCluster] = []
+            var totalErrors = 0, made = 0
+            for g in groups {
+                if shouldStop { break }
+                let (cluster, errors) = await self.safeMergeOne(g, intoParent: parentID, mergedName: mergedName, token: token)
+                clusters.append(cluster); totalErrors += errors
+                if errors == 0 { made += 1 }
+            }
+            self.writeMergeLog(clusters, to: logDir, mode: "OneDrive copy to new folder (originals kept)")
+            self.isScanning = false
+            let errMsg = totalErrors > 0 ? " (\(totalErrors) error(s))" : ""
+            self.status = "Created \(made) merged copy(ies) in OneDrive\(errMsg). Originals untouched."
+        }
+    }
+
+    private func safeMergeOne(_ g: CloudFolderDupGroup, intoParent parentID: String,
+                              mergedName: (String, String) -> String, token: String) async -> (MergeLogCluster, Int) {
+        let keep = g.keepFolder
+        var errors = 0
+        var entries: [MergeLogEntry] = []
+        guard let keepID = folderPathToID[keep] else {
+            entries.append(MergeLogEntry(action: "ERROR", fileName: g.keepName,
+                sourcePath: "OneDrive:" + keep, sourceFolder: "OneDrive:" + keep,
+                destinationPath: "", destinationFolder: "", sizeBytes: 0, sha256: "",
+                note: "could not resolve keep folder id — cluster skipped"))
+            return (MergeLogCluster(keepFolder: "OneDrive:" + keep, otherFolders: g.otherFolders.map { "OneDrive:" + $0 },
+                resultName: g.keepName, resultPath: "OneDrive:" + keep, entries: entries), 1)
+        }
+
+        // 1. Copy the keep folder's whole subtree into the destination as the merge base.
+        let base = mergedName(g.keepFolder, g.otherFolders.first ?? g.keepFolder)
+        let resultName = base.isEmpty ? g.keepName : base
+        guard let newFolderID = await copyItem(id: keepID, toParent: parentID, name: resultName, token: token) else {
+            entries.append(MergeLogEntry(action: "ERROR", fileName: resultName,
+                sourcePath: "OneDrive:" + keep, sourceFolder: "OneDrive:" + keep,
+                destinationPath: "", destinationFolder: "", sizeBytes: 0, sha256: "",
+                note: "failed to copy keep folder as the merge base"))
+            return (MergeLogCluster(keepFolder: "OneDrive:" + keep, otherFolders: g.otherFolders.map { "OneDrive:" + $0 },
+                resultName: resultName, resultPath: "OneDrive:" + resultName, entries: entries), 1)
+        }
+        entries.append(MergeLogEntry(action: "FOLDER_COPIED", fileName: resultName,
+            sourcePath: "OneDrive:" + keep, sourceFolder: "OneDrive:" + (keep as NSString).deletingLastPathComponent,
+            destinationPath: "OneDrive:" + resultName, destinationFolder: "OneDrive", sizeBytes: 0, sha256: "",
+            note: "keep folder copied as the merge base"))
+
+        // 2. Copy each unique file into the new folder (rename on collision with keep's names).
+        var usedNames = g.keepFileNames
+        for f in g.filesToMove {
+            if shouldStop { break }
+            var destName = f.name
+            var renamed = false
+            if usedNames.contains(destName) {
+                renamed = true
+                let srcFolderName = (f.path as NSString).lastPathComponent
+                destName = FileScanner.resolveCollisionName(for: f.name, sourceFolderName: srcFolderName)
+                var suffix = 2
+                while usedNames.contains(destName) {
+                    let ext = (destName as NSString).pathExtension
+                    let baseName = ext.isEmpty ? destName : String(destName.dropLast(ext.count + 1))
+                    destName = ext.isEmpty ? "\(baseName)_\(suffix)" : "\(baseName)_\(suffix).\(ext)"
+                    suffix += 1
+                }
+            }
+            let ok = await copyItem(id: f.id, toParent: newFolderID, name: destName, token: token) != nil
+            if ok { usedNames.insert(destName) } else { errors += 1 }
+            entries.append(MergeLogEntry(
+                action: ok ? (renamed ? "COPIED+RENAMED" : "COPIED") : "ERROR",
+                fileName: f.name, sourcePath: "OneDrive:" + f.fullPath, sourceFolder: "OneDrive:" + f.path,
+                destinationPath: ok ? "OneDrive:" + resultName + "/" + destName : "", destinationFolder: ok ? "OneDrive:" + resultName : "",
+                sizeBytes: Int(f.size), sha256: "quickXor:" + f.hash,
+                note: ok ? (renamed ? "renamed to \(destName) (name collision)" : "") : "copy failed"))
+        }
+
+        // 3. Record duplicate copies intentionally not copied (left untouched in the originals).
+        let moveIDs = Set(g.filesToMove.map { $0.id })
+        for mg in g.matchedGroups {
+            for f in mg.files where f.path != keep && !moveIDs.contains(f.id) {
+                entries.append(MergeLogEntry(action: "SKIPPED", fileName: f.name,
+                    sourcePath: "OneDrive:" + f.fullPath, sourceFolder: "OneDrive:" + f.path,
+                    destinationPath: "", destinationFolder: "", sizeBytes: Int(f.size),
+                    sha256: "quickXor:" + f.hash, note: "duplicate — not copied"))
+            }
+        }
+
+        return (MergeLogCluster(keepFolder: "OneDrive:" + keep, otherFolders: g.otherFolders.map { "OneDrive:" + $0 },
+            resultName: resultName, resultPath: "OneDrive:" + resultName, entries: entries), errors)
+    }
+
+    // Graph copy is asynchronous: POST returns 202 + a monitor URL we poll until the
+    // copy completes. Returns the new item's id, or nil on failure.
+    private func copyItem(id: String, toParent parentID: String, name: String?, token: String) async -> String? {
+        guard let url = URL(string: OneDriveConfig.graphBase + "/me/drive/items/\(id)/copy") else { return nil }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var body: [String: Any] = ["parentReference": ["id": parentID]]
+        if let n = name { body["name"] = n }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              let http = resp as? HTTPURLResponse else { return nil }
+        if http.statusCode == 202, let monitor = http.value(forHTTPHeaderField: "Location") {
+            return await pollCopyMonitor(monitor)
+        }
+        // Fallback: a tenant may return the created item inline.
+        if (200...201).contains(http.statusCode),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return json["id"] as? String
+        }
+        return nil
+    }
+
+    // Poll the async-copy monitor URL until the operation completes; return the new id.
+    private func pollCopyMonitor(_ urlString: String) async -> String? {
+        guard let url = URL(string: urlString) else { return nil }
+        for _ in 0..<180 {   // ~2 min at 700 ms intervals
+            if shouldStop { return nil }
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+            let st = json["status"] as? String
+            if st == "completed" { return (json["resourceId"] as? String) ?? (json["id"] as? String) }
+            if st == "failed" { return nil }
+            if st == nil, let iid = json["id"] as? String { return iid }   // redirected to the finished item
+            try? await Task.sleep(nanoseconds: 700_000_000)
+        }
+        return nil
+    }
+
+    private func delete(_ targets: [CloudFileInfo], keep: CloudFileInfo?, keepByHash: [String: CloudFileInfo] = [:]) {
         guard !targets.isEmpty else { return }
         isScanning = true
         status = "Deleting \(targets.count) file(s) from OneDrive…"
         Task {
-            guard let token = await auth.validAccessToken() else {
+            guard let token = await provider.validAccessToken() else {
                 self.isScanning = false; self.status = "Not connected."; return
             }
             var ok = 0, errors = 0
