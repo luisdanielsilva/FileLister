@@ -5,7 +5,7 @@ features land or plans change.
 
 Status legend: ✅ Done · 🚧 In progress / uncommitted · 📋 Planned
 
-Latest released version: **v1.13.0**.
+Latest version: **v1.17.0** (committed & pushed to `origin/main`). Latest GitHub *release*: **v1.13.0** (v1.14–v1.17 are tagged commits awaiting releases).
 
 ---
 
@@ -63,9 +63,22 @@ SHA-256 for cloud content matching.
 | **Files** — operation logging + reveal log | ✅ | |
 | **Folders** — duplicate folder cluster detection | ✅ | v1.13.0; reuses local union-find on crawled files |
 | **Folders** — in-place merge (move uniques → keep, recycle others, rename, review, merge-all, log dropdown) | ✅ | v1.13.0; verified against a real account. Graph `PATCH parentReference` / `DELETE` / `PATCH name` |
-| **Folders** — "Copy to new folder" (safe merge) | 📋 | [#3](https://github.com/luisdanielsilva/FileLister/issues/3). Destination selectable: new folder in OneDrive (cloud-to-cloud copy) **or** a local folder (download/export) |
+| **Folders** — "Copy to new folder" (safe merge, cloud→cloud) | ✅ | v1.17.0; [#3](https://github.com/luisdanielsilva/FileLister/issues/3). Async Graph `copy` + monitor poll; pick/create destination ("New Folder") + copy-mode confirmation sheets; originals untouched |
+| **Folders** — safe merge to a **local** folder (download/export) | 📋 | [#3](https://github.com/luisdanielsilva/FileLister/issues/3); deferred — needs keep-folder inventory + bulk-download UI |
 | **Folders** — delete redundant folders only | 📋 | Lower-risk variant; may be obsoleted by the in-place merge |
 | **Photos** — cloud similar-photo detection | 📋 | [#4](https://github.com/luisdanielsilva/FileLister/issues/4). Not started; needs image/thumbnail download + perceptual hashing |
+
+### Remote provider abstraction ([#6](https://github.com/luisdanielsilva/FileLister/issues/6) — Local vs Remote)
+
+Generalizing the OneDrive code into a provider-agnostic **Remote** layer so other backends drop in without touching scan/merge logic.
+
+| Phase | Status | Notes |
+|---|---|---|
+| Phase 1 — `RemoteProvider` protocol + `RemoteEngine`; OneDrive conforms; mode bar reads "Local / Remote" | ✅ | v1.17.0. Auth/identity extracted; listing/crawl/mutations still inline (pulled up in Phase 3) |
+| Phase 2 — multi-connection mgmt (Keychain, picker, Settings tab, default, ⌥-click) | 📋 | [#7](https://github.com/luisdanielsilva/FileLister/issues/7) |
+| Phase 3 — Google Drive provider (proves the abstraction) | 📋 | [#8](https://github.com/luisdanielsilva/FileLister/issues/8) |
+| Phase 4 — FTP/FTPS provider | 📋 | [#9](https://github.com/luisdanielsilva/FileLister/issues/9) |
+| Protect locally-synced files from remote deletion | 📋 | [#13](https://github.com/luisdanielsilva/FileLister/issues/13); data-loss safeguard |
 
 ---
 
@@ -97,6 +110,10 @@ SHA-256 for cloud content matching.
 | v1.11.0 | OneDrive (Files): connect + cloud duplicate detection & delete |
 | v1.12.0 | OneDrive folder selection, cloud preview/progress, per-file delete; Help & entitlement fixes |
 | v1.13.0 | OneDrive Folders: duplicate cluster detection + in-place merge (verified) |
+| v1.14.0 | Two-row Options/Actions toolbar (prevents control crowding) |
+| v1.15.0 | Collapsible folder clusters + merge-composition pie chart |
+| v1.16.0 | Independent Files/Folders scanner engines, per-mode folder selection & state, Clean All pie |
+| v1.17.0 | Remote provider protocol (Phase 1 of #6); OneDrive safe merge "Copy to new folder" (cloud→cloud) + create-destination + confirmation sheets |
 
 > Note: the web portal / marketing site and licensing tools shared this repo early
 > on, then were split into separate repositories (mid-April 2026). Their commits are
@@ -110,3 +127,4 @@ SHA-256 for cloud content matching.
 - Folder merge mirrors local semantics exactly, including recycling an "other"
   folder wholesale (match-ratio threshold is the safeguard).
 - Destructive cloud operations send items to the **OneDrive recycle bin** (not hard delete).
+- "Copy to new folder" (safe merge) is **non-destructive**: it copies the merged result into a chosen folder and leaves all originals in place.
