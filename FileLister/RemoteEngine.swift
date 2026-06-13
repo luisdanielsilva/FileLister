@@ -66,12 +66,33 @@ final class RemoteEngine: ObservableObject {
     private let folderMatchThreshold = 0.75
     private var folderPathToID: [String: String] = [:]   // display path → drive item id (for folder merge)
 
-    // The active remote backend (OneDrive in Phase 1). Used for auth tokens; listing,
-    // crawl, and mutations still build Graph requests directly until issue #8.
-    let provider: any RemoteProvider
+    // The active remote backend, switchable between saved connections (#7). Used for
+    // auth tokens; listing, crawl, and mutations still build Graph requests directly
+    // until issue #8. nil until a connection is activated.
+    private(set) var provider: (any RemoteProvider)?
 
-    init(provider: any RemoteProvider) {
+    init(provider: (any RemoteProvider)? = nil) {
         self.provider = provider
+    }
+
+    // Point the engine at another connection's provider; results belong to the old
+    // drive, so clear them.
+    func setProvider(_ p: (any RemoteProvider)?) {
+        provider = p
+        groups = []
+        folderGroups = []
+        deletedIDs = []
+        hitLimit = false
+        progress = 0
+        lastLogURL = nil
+        safeMergeToNewFolder = false
+        status = p.map { "Connect and search to find duplicates in \($0.kind.displayName)." }
+            ?? "Choose a remote connection to scan for duplicates."
+    }
+
+    // "OneDrive — user@example.com", for the log's Provider field.
+    private var providerLabel: String? {
+        provider.map { $0.accountLabel.isEmpty ? $0.kind.displayName : "\($0.kind.displayName) — \($0.accountLabel)" }
     }
 
     // Merge controls (mirror local Folders mode).
@@ -100,7 +121,7 @@ final class RemoteEngine: ObservableObject {
         for f in folders { folderPathToID[f.path] = f.id }   // seed with the selected roots
 
         Task {
-            guard let token = await provider.validAccessToken() else {
+            guard let token = await provider?.validAccessToken() else {
                 self.isScanning = false; self.status = "Not connected. Please reconnect OneDrive."
                 return
             }
@@ -199,7 +220,7 @@ final class RemoteEngine: ObservableObject {
 
     // Lists child folders of a folder (nil/"root" = drive root) for the folder picker.
     func listFolders(parentID: String?) async -> [CloudFolder] {
-        guard let token = await provider.validAccessToken() else { return [] }
+        guard let token = await provider?.validAccessToken() else { return [] }
         var urlStr: String? = {
             let base = (parentID == nil || parentID == "root")
                 ? OneDriveConfig.graphBase + "/me/drive/root/children"
@@ -228,7 +249,7 @@ final class RemoteEngine: ObservableObject {
 
     // Create a new subfolder under `parentID` and return it (display path mirrors listFolders).
     func createFolder(named name: String, in parentID: String?) async -> CloudFolder? {
-        guard let token = await provider.validAccessToken() else { return nil }
+        guard let token = await provider?.validAccessToken() else { return nil }
         let base = (parentID == nil || parentID == "root")
             ? OneDriveConfig.graphBase + "/me/drive/root/children"
             : OneDriveConfig.graphBase + "/me/drive/items/\(parentID!)/children"
@@ -386,7 +407,7 @@ final class RemoteEngine: ObservableObject {
         previewProgress = 0
         status = "Downloading \(file.name)…"
         Task {
-            guard let token = await provider.validAccessToken(),
+            guard let token = await provider?.validAccessToken(),
                   let url = URL(string: OneDriveConfig.graphBase + "/me/drive/items/\(file.id)/content") else {
                 self.previewingID = nil
                 self.status = "Couldn't preview \(file.name)."
@@ -475,7 +496,7 @@ final class RemoteEngine: ObservableObject {
         isScanning = true
         status = "Merging \(groups.count) folder cluster(s) in OneDrive…"
         Task {
-            guard let token = await provider.validAccessToken() else {
+            guard let token = await provider?.validAccessToken() else {
                 self.isScanning = false; self.status = "Not connected."; return
             }
             var clusters: [MergeLogCluster] = []
@@ -620,7 +641,8 @@ final class RemoteEngine: ObservableObject {
     private func writeMergeLog(_ clusters: [MergeLogCluster], to dir: URL?, mode: String = "OneDrive folder merge") {
         guard !clusters.isEmpty, let target = dir ?? MergeLogWriter.defaultAppLogDirectory() else { return }
         let report = MergeLogReport(timestamp: Date(), appVersion: MergeLogWriter.appVersion,
-                                    mode: mode, renameKeptFolder: renameKeptFolder, clusters: clusters)
+                                    mode: mode, renameKeptFolder: renameKeptFolder,
+                                    provider: providerLabel, clusters: clusters)
         lastLogURL = MergeLogWriter.write(report, to: target)
     }
 
@@ -638,7 +660,7 @@ final class RemoteEngine: ObservableObject {
         isScanning = true
         status = "Creating \(groups.count) merged copy(ies) in OneDrive…"
         Task {
-            guard let token = await provider.validAccessToken() else {
+            guard let token = await provider?.validAccessToken() else {
                 self.isScanning = false; self.status = "Not connected."; return
             }
             var clusters: [MergeLogCluster] = []
@@ -774,7 +796,7 @@ final class RemoteEngine: ObservableObject {
         isScanning = true
         status = "Deleting \(targets.count) file(s) from OneDrive…"
         Task {
-            guard let token = await provider.validAccessToken() else {
+            guard let token = await provider?.validAccessToken() else {
                 self.isScanning = false; self.status = "Not connected."; return
             }
             var ok = 0, errors = 0
@@ -829,7 +851,8 @@ final class RemoteEngine: ObservableObject {
         guard !entries.isEmpty, let dir = MergeLogWriter.defaultAppLogDirectory() else { return }
         let cluster = MergeLogCluster(keepFolder: "OneDrive", otherFolders: [], resultName: "OneDrive cleanup", resultPath: "OneDrive", entries: entries)
         let report = MergeLogReport(timestamp: Date(), appVersion: MergeLogWriter.appVersion,
-                                    mode: "OneDrive cleanup", renameKeptFolder: false, clusters: [cluster])
+                                    mode: "OneDrive cleanup", renameKeptFolder: false,
+                                    provider: providerLabel, clusters: [cluster])
         lastLogURL = MergeLogWriter.write(report, to: dir)
     }
 }

@@ -1,6 +1,12 @@
 import SwiftUI
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated {
+            RemoteConnectionStore.shared.purgeAllTokens()
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Remove standard menus (File, Edit, View, Window) but keep the app menu and Help menu
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {

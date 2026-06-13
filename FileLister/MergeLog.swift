@@ -35,6 +35,7 @@ struct MergeLogReport: Codable {
     let appVersion: String
     let mode: String                // human-readable description of the merge mode
     let renameKeptFolder: Bool
+    var provider: String? = nil     // remote source, e.g. "OneDrive — user@example.com" (nil = local)
     let clusters: [MergeLogCluster]
 
     var totalFilesMoved: Int {
@@ -169,7 +170,7 @@ enum MergeLogWriter {
           }
         </style></head><body>
           <h1>FileLister — Merge Log</h1>
-          <div class="sub">\(esc(when)) · \(esc(report.mode)) · v\(esc(report.appVersion))</div>
+          <div class="sub">\(esc(when)) · \(esc(report.mode))\(report.provider.map { " · Provider: " + esc($0) } ?? "") · v\(esc(report.appVersion))</div>
           <div class="summary">
             <div><b>\(report.clusters.count)</b><span>folder cluster(s)</span></div>
             <div><b>\(report.totalFilesMoved)</b><span>files moved/copied</span></div>
@@ -255,7 +256,7 @@ enum LogPDFRenderer {
         let df = DateFormatter(); df.dateStyle = .long; df.timeStyle = .medium
 
         add("FileLister — Operation Log", font: .boldSystemFont(ofSize: 18))
-        add("\(df.string(from: report.timestamp))  ·  \(report.mode)  ·  v\(report.appVersion)",
+        add("\(df.string(from: report.timestamp))  ·  \(report.mode)\(report.provider.map { "  ·  Provider: " + $0 } ?? "")  ·  v\(report.appVersion)",
             font: .systemFont(ofSize: 10), color: .darkGray, after: 10)
         add("Summary: \(report.clusters.count) group(s) · \(report.totalFilesMoved) moved/copied · \(report.totalFilesRemoved) removed · \(byteString(report.totalBytesRemoved)) reclaimed · \(report.errorCount) error(s)",
             font: .systemFont(ofSize: 11), after: 14)

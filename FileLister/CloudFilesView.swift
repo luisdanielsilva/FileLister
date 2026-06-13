@@ -18,6 +18,7 @@ struct ProgressRing: View {
 struct CloudFilesView: View {
     @ObservedObject var engine: RemoteEngine
     @Binding var selectedCloudID: String?
+    @State private var showingDeleteAll = false
 
     var body: some View {
         if engine.isScanning {
@@ -49,7 +50,7 @@ struct CloudFilesView: View {
                             Label("Reveal Log", systemImage: "doc.text.magnifyingglass").font(.system(size: 10))
                         }.buttonStyle(.bordered).controlSize(.small)
                     }
-                    Button(action: { engine.deleteAll() }) {
+                    Button(action: { showingDeleteAll = true }) {
                         Label("Delete all duplicates", systemImage: "trash").font(.system(size: 10, weight: .bold))
                     }.buttonStyle(.bordered).controlSize(.small)
                 }
@@ -64,6 +65,9 @@ struct CloudFilesView: View {
                     .padding(.horizontal)
                 }
             }
+            .sheet(isPresented: $showingDeleteAll) {
+                CloudDeleteAllSheet(engine: engine, onDeleteAll: { engine.deleteAll() })
+            }
         }
     }
 
@@ -75,6 +79,7 @@ struct CloudGroupCard: View {
     @ObservedObject var engine: RemoteEngine
     let group: CloudDupGroup
     @Binding var selectedCloudID: String?
+    @State private var showingDeleteConfirm = false
 
     var body: some View {
         let live = group.files.filter { !engine.deletedIDs.contains($0.id) }
@@ -95,7 +100,7 @@ struct CloudGroupCard: View {
                     .padding(.horizontal, 5).padding(.vertical, 1)
                     .background(live.count > 1 ? Color.blue.opacity(0.1) : Color.green.opacity(0.1))
                     .foregroundColor(live.count > 1 ? .blue : .green).cornerRadius(3)
-                Button(action: { engine.deleteDuplicates(in: group) }) {
+                Button(action: { showingDeleteConfirm = true }) {
                     HStack(spacing: 4) { Image(systemName: "trash"); Text("Delete dupes") }
                         .font(.system(size: 10, weight: .bold)).foregroundColor(.red)
                         .padding(.horizontal, 8).padding(.vertical, 3)
@@ -144,6 +149,9 @@ struct CloudGroupCard: View {
             }
         }
         .padding(6).background(live.count > 1 ? Color.orange.opacity(0.08) : Color.green.opacity(0.05)).cornerRadius(4)
+        .sheet(isPresented: $showingDeleteConfirm) {
+            CloudDeleteGroupSheet(engine: engine, group: group, onDelete: { engine.deleteDuplicates(in: group) })
+        }
     }
 }
 

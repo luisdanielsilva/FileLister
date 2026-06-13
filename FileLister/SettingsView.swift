@@ -7,6 +7,8 @@ struct SettingsView: View {
                 .tabItem { Label("Photos", systemImage: "photo.on.rectangle.angled") }
             OneDriveSettingsView()
                 .tabItem { Label("OneDrive", systemImage: "cloud") }
+            RemoteConnectionsSettingsView()
+                .tabItem { Label("Connections", systemImage: "person.crop.circle.badge.plus") }
         }
         .frame(width: 460, height: 400)
     }

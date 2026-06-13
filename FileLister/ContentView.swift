@@ -134,17 +134,16 @@ struct ContentView: View {
     // The scanner for the current mode (Folders uses its own; everything else uses the file scanner).
     private var scanner: FileScanner { mode == .folders ? folderScanner : fileScanner }
     @StateObject private var photoEngine = PhotoEngine()
-    // Active remote provider (OneDrive in Phase 1) + the provider-agnostic engine that
-    // wraps it. Created together so the engine and the UI share one provider instance.
-    @StateObject private var remoteProvider: OneDriveProvider
-    @StateObject private var remoteEngine: RemoteEngine
+    // Saved remote connections (Phase 2 of #6). The store owns one provider per
+    // connection; the engine is pointed at the active one on activation.
+    @ObservedObject private var connectionStore = RemoteConnectionStore.shared
+    @StateObject private var remoteEngine = RemoteEngine()
     @EnvironmentObject var licenseManager: LicenseManager
+    @State private var showingConnectionPicker = false
 
-    init() {
-        let provider = OneDriveProvider()
-        _remoteProvider = StateObject(wrappedValue: provider)
-        _remoteEngine = StateObject(wrappedValue: RemoteEngine(provider: provider))
-    }
+    // Convenience accessors for the active connection's provider state.
+    private var activeProvider: OneDriveProvider? { connectionStore.activeProvider }
+    private var remoteConnected: Bool { activeProvider?.isConnected ?? false }
     @State private var mode: AppMode = .files
     @State private var source: ScanSource = .local
     @State private var selectedCloudFolders: [CloudFolder] = []
@@ -250,21 +249,31 @@ struct ContentView: View {
                 }
 
                 Picker("", selection: $source) {
-                    ForEach(ScanSource.allCases) { s in
-                        Label(s.rawValue, systemImage: s.icon).tag(s)
-                    }
+                    Label(ScanSource.local.rawValue, systemImage: ScanSource.local.icon).tag(ScanSource.local)
+                    // Remote segment reflects the active connection's provider + name.
+                    Label(connectionStore.activeConnection?.displayName ?? ScanSource.remote.rawValue,
+                          systemImage: connectionStore.activeConnection?.kind.icon ?? ScanSource.remote.icon)
+                        .tag(ScanSource.remote)
                 }
                 .pickerStyle(.segmented)
                 .labelStyle(.titleAndIcon)
-                .frame(width: 190)
+                .frame(width: 220)
                 .disabled(activeScanning)
-                .help("Scan local folders or your OneDrive (not combined yet).")
+                .help("Scan local folders or a remote connection (⌥-click Remote to pick a connection).")
+                .onChange(of: source) { s in
+                    guard s == .remote else { return }
+                    let optionHeld = NSApp.currentEvent?.modifierFlags.contains(.option) ?? false
+                    if optionHeld { showingConnectionPicker = true }
+                    else if connectionStore.activeConnection != nil { /* keep current session */ }
+                    else if let def = connectionStore.defaultConnection { activateConnection(def) }
+                    else { showingConnectionPicker = true }
+                }
             }
             .padding(.horizontal).padding(.top, 10)
 
             // Top Bar
             HStack(spacing: 12) {
-                let searchDisabled = source == .remote ? (!remoteProvider.isConnected || (selectedCloudFolders.isEmpty && !remoteEngine.isScanning)) : (sourceFolders.isEmpty && !activeScanning)
+                let searchDisabled = source == .remote ? (!remoteConnected || (selectedCloudFolders.isEmpty && !remoteEngine.isScanning)) : (sourceFolders.isEmpty && !activeScanning)
                 Button(action: { startScanning() }) {
                     HStack {
                         Image(systemName: activeScanning ? "stop.circle.fill" : "magnifyingglass.circle.fill")
@@ -330,12 +339,18 @@ struct ContentView: View {
                         .help("Across all: find duplicates pooled across every folder.\nWithin each: find duplicates only inside each folder separately.")
                     }
                 } else {
-                    // OneDrive connection / folder panel
+                    // Remote connection / folder panel
                     HStack(spacing: 8) {
-                        Image(systemName: remoteProvider.isConnected ? "cloud.fill" : "cloud").foregroundColor(remoteProvider.isConnected ? .blue : .secondary)
-                        if remoteProvider.isConnected {
+                        Image(systemName: remoteConnected ? "cloud.fill" : (connectionStore.activeConnection?.kind.icon ?? "cloud"))
+                            .foregroundColor(remoteConnected ? .blue : .secondary)
+                        if connectionStore.activeConnection == nil {
+                            Text("No connection selected").font(.system(size: 11)).foregroundColor(.secondary)
+                            Spacer(minLength: 0)
+                            Button("Choose Connection…") { showingConnectionPicker = true }
+                                .buttonStyle(.bordered).controlSize(.small)
+                        } else if remoteConnected {
                             if selectedCloudFolders.isEmpty {
-                                Text("\(remoteProvider.accountLabel) — no folders selected").font(.system(size: 11)).foregroundColor(.secondary)
+                                Text("\(connectionStore.activeConnection?.displayName ?? "") · \(activeProvider?.accountLabel ?? "") — no folders selected").font(.system(size: 11)).foregroundColor(.secondary)
                             } else {
                                 ScrollView(.horizontal, showsIndicators: false) {
                                     HStack(spacing: 6) {
@@ -356,19 +371,24 @@ struct ContentView: View {
                             Spacer(minLength: 0)
                             Button("Add Folder…") { showingCloudPicker = true }
                                 .buttonStyle(.bordered).controlSize(.small).disabled(remoteEngine.isScanning)
-                            Button("Sign Out") { remoteProvider.disconnect(); selectedCloudFolders = [] }
+                            Button("Switch…") { showingConnectionPicker = true }
+                                .buttonStyle(.bordered).controlSize(.small).disabled(remoteEngine.isScanning)
+                                .help("Switch to another saved connection (⌥-click Remote also works)")
+                            Button("Sign Out") { activeProvider?.disconnect(); selectedCloudFolders = [] }
                                 .buttonStyle(.bordered).controlSize(.small)
                         } else {
-                            Text("Not connected").font(.system(size: 11)).foregroundColor(.secondary)
+                            Text("\(connectionStore.activeConnection?.displayName ?? "") — not signed in").font(.system(size: 11)).foregroundColor(.secondary)
                             Spacer(minLength: 0)
-                            Button("Connect OneDrive…") { remoteProvider.connect() }
+                            Button("Connect \(connectionStore.activeConnection?.displayName ?? "")…") { activeProvider?.connect() }
+                                .buttonStyle(.bordered).controlSize(.small)
+                            Button("Switch…") { showingConnectionPicker = true }
                                 .buttonStyle(.bordered).controlSize(.small)
                         }
                     }
                     .padding(.horizontal, 10).frame(height: 32)
                     .background(Color(NSColor.controlBackgroundColor))
                     .cornerRadius(6).overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.2), lineWidth: 1))
-                    .onChange(of: remoteProvider.isConnected) { connected in
+                    .onChange(of: remoteConnected) { connected in
                         if connected && source == .remote && selectedCloudFolders.isEmpty {
                             showingCloudPicker = true
                         }
@@ -675,29 +695,36 @@ struct ContentView: View {
 
             // Duplicates List
             if source == .remote {
-                if remoteProvider.isConnected && mode == .files && (!selectedCloudFolders.isEmpty || !remoteEngine.groups.isEmpty) {
+                if remoteConnected && mode == .files && (!selectedCloudFolders.isEmpty || !remoteEngine.groups.isEmpty) {
                     CloudFilesView(engine: remoteEngine, selectedCloudID: $selectedCloudID)
-                } else if remoteProvider.isConnected && mode == .folders && (!selectedCloudFolders.isEmpty || !remoteEngine.folderGroups.isEmpty) {
+                } else if remoteConnected && mode == .folders && (!selectedCloudFolders.isEmpty || !remoteEngine.folderGroups.isEmpty) {
                     CloudFoldersView(engine: remoteEngine, selectedCloudID: $selectedCloudID,
                                      onMergeCluster: { previewCloudCluster = $0 })
                 } else {
                     Spacer()
                     VStack(spacing: 12) {
+                        let connName = connectionStore.activeConnection?.displayName ?? "Remote"
                         Image(systemName: "cloud").font(.system(size: 48)).foregroundColor(.gray.opacity(0.25))
-                        Text(remoteProvider.isConnected ? "OneDrive — \(mode.rawValue)" : "OneDrive")
+                        Text(remoteConnected ? "\(connName) — \(mode.rawValue)" : connName)
                             .font(.title3).fontWeight(.semibold)
-                        Text(remoteProvider.isConnected
+                        Text(remoteConnected
                              ? ((mode == .files || mode == .folders)
-                                ? "Add one or more OneDrive folders, then press Search."
-                                : "Duplicate \(mode.rawValue.lowercased()) on OneDrive arrives in a later update.")
-                             : "Connect your OneDrive account to scan it for duplicates.")
+                                ? "Add one or more folders, then press Search."
+                                : "Duplicate \(mode.rawValue.lowercased()) on \(connName) arrives in a later update.")
+                             : (connectionStore.activeConnection == nil
+                                ? "Choose a remote connection to scan for duplicates."
+                                : "Connect \(connName) to scan it for duplicates."))
                             .font(.caption).foregroundColor(.secondary).multilineTextAlignment(.center)
-                        if remoteProvider.isConnected && (mode == .files || mode == .folders) && selectedCloudFolders.isEmpty {
-                            Button("Add OneDrive Folder…") { showingCloudPicker = true }
+                        if remoteConnected && (mode == .files || mode == .folders) && selectedCloudFolders.isEmpty {
+                            Button("Add Folder…") { showingCloudPicker = true }
                                 .controlSize(.small)
                         }
-                        if !remoteProvider.statusMessage.isEmpty {
-                            Text(remoteProvider.statusMessage).font(.caption2).foregroundColor(.secondary)
+                        if connectionStore.activeConnection == nil {
+                            Button("Choose Connection…") { showingConnectionPicker = true }
+                                .controlSize(.small)
+                        }
+                        if let st = activeProvider?.statusMessage, !st.isEmpty {
+                            Text(st).font(.caption2).foregroundColor(.secondary)
                         }
                     }
                     Spacer()
@@ -941,6 +968,11 @@ struct ContentView: View {
                 },
                 onCancel: { showingCloudMergeAllSheet = false }
             )
+        }
+        .sheet(isPresented: $showingConnectionPicker) {
+            RemoteConnectionPickerSheet(store: connectionStore,
+                                        onSelect: { activateConnection($0) },
+                                        onClose: { showingConnectionPicker = false })
         }
         .alert("Register the application to use this feature", isPresented: $showingRegisterAlert) {
             Button("Register here") {
@@ -1293,16 +1325,31 @@ struct ContentView: View {
         }
     }
 
+    // Switch the Remote source to a saved connection: point the engine at its
+    // provider, clear per-drive state, and start sign-in if it has no tokens yet.
+    private func activateConnection(_ conn: RemoteConnection) {
+        if connectionStore.activeID == conn.id {
+            if !(activeProvider?.isConnected ?? false) { activeProvider?.connect() }
+            return
+        }
+        let p = connectionStore.activate(conn)
+        remoteEngine.setProvider(p)
+        selectedCloudFolders = []
+        selectedCloudID = nil
+        cloudSafeMergeDestination = nil
+        if !p.isConnected { p.connect() }
+    }
+
     private func startScanning() {
         if source == .remote {
             if remoteEngine.isScanning { remoteEngine.stop(); return }
-            guard remoteProvider.isConnected, !selectedCloudFolders.isEmpty else { return }
+            guard remoteConnected, !selectedCloudFolders.isEmpty else { return }
             if mode == .files {
                 remoteEngine.scan(folders: selectedCloudFolders)
             } else if mode == .folders {
                 remoteEngine.scan(folders: selectedCloudFolders, folderMode: true)
             } else {
-                remoteProvider.statusMessage = "OneDrive \(mode.rawValue) scanning arrives in a later update."
+                activeProvider?.statusMessage = "\(mode.rawValue) scanning on remote drives arrives in a later update."
             }
             return
         }

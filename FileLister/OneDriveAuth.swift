@@ -57,16 +57,30 @@ final class OneDriveAuth: NSObject, ObservableObject, ASWebAuthenticationPresent
     private var tokens: TokenSet? { didSet { persist() } }
     private var session: ASWebAuthenticationSession?
     private var pkceVerifier = ""
-    private let account = "default"
+    // One Keychain slot per saved connection ("default" = the original single-account slot).
+    private let account: String
+    private var nameKey: String { "oneDriveAccountName-" + account }
 
-    override init() {
+    init(keychainAccount: String = "default") {
+        self.account = keychainAccount
         super.init()
         if let data = Keychain.load(account: account),
            let t = try? JSONDecoder().decode(TokenSet.self, from: data) {
             tokens = t
             isConnected = true
-            accountName = UserDefaults.standard.string(forKey: "oneDriveAccountName") ?? "OneDrive"
+            accountName = UserDefaults.standard.string(forKey: nameKey)
+                ?? UserDefaults.standard.string(forKey: "oneDriveAccountName")   // legacy single-account key
+                ?? "OneDrive"
         }
+    }
+
+    // True when tokens exist in the original single-account slot (pre-connections migration).
+    static var hasLegacyDefaultTokens: Bool { Keychain.load(account: "default") != nil }
+
+    // Remove a connection's stored tokens + cached account name (used when deleting a connection).
+    static func purgeTokens(keychainAccount: String) {
+        Keychain.delete(account: keychainAccount)
+        UserDefaults.standard.removeObject(forKey: "oneDriveAccountName-" + keychainAccount)
     }
 
     private func persist() {
@@ -121,7 +135,8 @@ final class OneDriveAuth: NSObject, ObservableObject, ASWebAuthenticationPresent
     func disconnect() {
         tokens = nil
         Keychain.delete(account: account)
-        UserDefaults.standard.removeObject(forKey: "oneDriveAccountName")
+        UserDefaults.standard.removeObject(forKey: nameKey)
+        if account == "default" { UserDefaults.standard.removeObject(forKey: "oneDriveAccountName") }
         isConnected = false
         accountName = ""
         status = "Disconnected."
@@ -195,7 +210,7 @@ final class OneDriveAuth: NSObject, ObservableObject, ASWebAuthenticationPresent
             let name = (json["displayName"] as? String) ?? (json["userPrincipalName"] as? String) ?? "OneDrive"
             await MainActor.run {
                 self.accountName = name
-                UserDefaults.standard.set(name, forKey: "oneDriveAccountName")
+                UserDefaults.standard.set(name, forKey: self.nameKey)
             }
         }
     }
