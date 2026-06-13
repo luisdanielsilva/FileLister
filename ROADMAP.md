@@ -5,7 +5,7 @@ features land or plans change.
 
 Status legend: ✅ Done · 🚧 In progress / uncommitted · 📋 Planned
 
-Latest version: **v1.17.0** (committed & pushed to `origin/main`). Latest GitHub *release*: **v1.13.0** (v1.14–v1.17 are tagged commits awaiting releases).
+Latest version: **v1.18.0** (committed & pushed to `origin/main`). Latest GitHub *release*: **v1.13.0** (v1.14–v1.18 are tagged commits awaiting releases).
 
 ---
 
@@ -59,7 +59,7 @@ SHA-256 for cloud content matching.
 | Scan limits (max files / max GB) in Settings | ✅ | |
 | **Files** — cloud duplicate detection | ✅ | v1.11.0 |
 | **Files** — Quick Look preview w/ download progress | ✅ | v1.12.0 |
-| **Files** — per-file / per-group / delete-all to recycle bin | ✅ | v1.12.0 |
+| **Files** — per-file / per-group / delete-all to recycle bin | ✅ | v1.12.0; confirmation sheets added v1.18.0 |
 | **Files** — operation logging + reveal log | ✅ | |
 | **Folders** — duplicate folder cluster detection | ✅ | v1.13.0; reuses local union-find on crawled files |
 | **Folders** — in-place merge (move uniques → keep, recycle others, rename, review, merge-all, log dropdown) | ✅ | v1.13.0; verified against a real account. Graph `PATCH parentReference` / `DELETE` / `PATCH name` |
@@ -75,7 +75,7 @@ Generalizing the OneDrive code into a provider-agnostic **Remote** layer so othe
 | Phase | Status | Notes |
 |---|---|---|
 | Phase 1 — `RemoteProvider` protocol + `RemoteEngine`; OneDrive conforms; mode bar reads "Local / Remote" | ✅ | v1.17.0. Auth/identity extracted; listing/crawl/mutations still inline (pulled up in Phase 3) |
-| Phase 2 — multi-connection mgmt (Keychain, picker, Settings tab, default, ⌥-click) | 📋 | [#7](https://github.com/luisdanielsilva/FileLister/issues/7) |
+| Phase 2 — multi-connection mgmt (Keychain, picker, Settings tab, default, ⌥-click) | ✅ | v1.18.0. [#7](https://github.com/luisdanielsilva/FileLister/issues/7). RemoteConnectionStore; token purge on quit; provider label in logs |
 | Phase 3 — Google Drive provider (proves the abstraction) | 📋 | [#8](https://github.com/luisdanielsilva/FileLister/issues/8) |
 | Phase 4 — FTP/FTPS provider | 📋 | [#9](https://github.com/luisdanielsilva/FileLister/issues/9) |
 | Protect locally-synced files from remote deletion | 📋 | [#13](https://github.com/luisdanielsilva/FileLister/issues/13); data-loss safeguard |
@@ -114,6 +114,7 @@ Generalizing the OneDrive code into a provider-agnostic **Remote** layer so othe
 | v1.15.0 | Collapsible folder clusters + merge-composition pie chart |
 | v1.16.0 | Independent Files/Folders scanner engines, per-mode folder selection & state, Clean All pie |
 | v1.17.0 | Remote provider protocol (Phase 1 of #6); OneDrive safe merge "Copy to new folder" (cloud→cloud) + create-destination + confirmation sheets |
+| v1.18.0 | Multi-connection remote management (#7 / Phase 2 of #6): RemoteConnectionStore, per-connection Keychain slots, connection picker (⌥-click), Settings → Connections tab, token purge on quit; Files mode delete confirmation sheets |
 
 > Note: the web portal / marketing site and licensing tools shared this repo early
 > on, then were split into separate repositories (mid-April 2026). Their commits are
