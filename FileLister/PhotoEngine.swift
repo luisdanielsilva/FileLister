@@ -348,10 +348,10 @@ class PhotoEngine: ObservableObject {
     }
 
     // Global "delete all non-keepers" — one Trash op + one log across all groups.
-    func recycleAllNonKeepers() {
+    func recycleAllNonKeepers(in targetGroups: [PhotoGroup]? = nil) {
         var batch: [(keeper: PhotoInfo?, deleted: [PhotoInfo])] = []
         var urls: [URL] = []
-        for g in groups {
+        for g in (targetGroups ?? groups) {
             let targets = g.photos.filter { $0.id != g.keeperID && !deletedPaths.contains($0.fullPath) }
             if !targets.isEmpty {
                 batch.append((g.keeper, targets))
@@ -375,8 +375,8 @@ class PhotoEngine: ObservableObject {
 
     // Copies every group's keeper into `destination`, replicating the folder
     // structure (relative to its scanned source root). Originals are untouched.
-    func copyKeepers(to destination: URL) {
-        let keepers = groups.compactMap { $0.keeper }
+    func copyKeepers(to destination: URL, from targetGroups: [PhotoGroup]? = nil) {
+        let keepers = (targetGroups ?? groups).compactMap { $0.keeper }
         guard !keepers.isEmpty else { return }
         isScanning = true
         status = "Copying keepers…"

@@ -19,6 +19,14 @@ struct CloudFilesView: View {
     @ObservedObject var engine: RemoteEngine
     @Binding var selectedCloudID: String?
     @State private var showingDeleteAll = false
+    @State private var sizeFilter = SizeFilter()
+
+    private var filteredGroups: [CloudDupGroup] {
+        guard sizeFilter.isActive else { return engine.groups }
+        return engine.groups.filter { sizeFilter.contains($0.sizeBytes) }
+    }
+
+    private var filterActive: Bool { sizeFilter.isActive }
 
     var body: some View {
         if engine.isScanning {
@@ -36,15 +44,21 @@ struct CloudFilesView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
+            let filtered = filteredGroups
             VStack(alignment: .leading, spacing: 0) {
+                // Header row
                 HStack {
-                    Text("OneDrive duplicates (\(engine.groups.count)):").font(.caption).fontWeight(.bold)
+                    Text("OneDrive duplicates (\(filterActive ? "\(filtered.count) of \(engine.groups.count)" : "\(engine.groups.count)")):")
+                        .font(.caption).fontWeight(.bold)
                     Text("Space to preview · ← → to move").font(.system(size: 8, weight: .bold)).foregroundColor(.blue)
                     if engine.hitLimit {
-                        Text("preview limit reached").font(.system(size: 8, weight: .bold)).foregroundColor(.orange)
+                        Text("scan limit reached").font(.system(size: 8, weight: .bold)).foregroundColor(.orange)
                             .padding(.horizontal, 4).padding(.vertical, 1).background(Color.orange.opacity(0.12)).cornerRadius(3)
+                            .help("The OneDrive scan stopped at the file/size limit. Raise or remove it in Settings → OneDrive.")
                     }
                     Spacer()
+                    SizeFilterBar(filter: $sizeFilter)
+                    Divider().frame(height: 16)
                     if let logURL = engine.lastLogURL {
                         Button(action: { NSWorkspace.shared.activateFileViewerSelecting([logURL]) }) {
                             Label("Reveal Log", systemImage: "doc.text.magnifyingglass").font(.system(size: 10))
@@ -52,13 +66,13 @@ struct CloudFilesView: View {
                     }
                     Button(action: { showingDeleteAll = true }) {
                         Label("Delete all duplicates", systemImage: "trash").font(.system(size: 10, weight: .bold))
-                    }.buttonStyle(.bordered).controlSize(.small)
+                    }.buttonStyle(.bordered).controlSize(.small).disabled(filtered.isEmpty)
                 }
                 .padding(.horizontal).padding(.vertical, 8).foregroundColor(.secondary)
 
                 ScrollView {
                     LazyVStack(spacing: 8) {
-                        ForEach(engine.groups) { group in
+                        ForEach(filtered) { group in
                             CloudGroupCard(engine: engine, group: group, selectedCloudID: $selectedCloudID)
                         }
                     }
@@ -66,9 +80,17 @@ struct CloudFilesView: View {
                 }
             }
             .sheet(isPresented: $showingDeleteAll) {
-                CloudDeleteAllSheet(engine: engine, onDeleteAll: { engine.deleteAll() })
+                CloudDeleteAllSheet(engine: engine, groups: filtered, onDeleteAll: { engine.deleteGroups(filtered) })
             }
+            // Keep the size-filter text fields from holding keyboard focus, so Space
+            // (preview) and the arrow keys reach their shortcuts instead of the field.
+            .onAppear { resignTextFocus() }
+            .onChange(of: selectedCloudID) { _, _ in resignTextFocus() }
         }
+    }
+
+    private func resignTextFocus() {
+        DispatchQueue.main.async { NSApp.keyWindow?.makeFirstResponder(nil) }
     }
 
 }

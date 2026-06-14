@@ -841,17 +841,17 @@ class FileScanner: ObservableObject {
         }
     }
 
-    func recycleAllDuplicates() {
+    func recycleAllDuplicates(matching predicate: ((DuplicateGroup) -> Bool)? = nil) {
         self.status = "Verifying batch integrity..."
         self.isScanning = true // Use scan state to block UI during heavy comparison
-        
+
         DispatchQueue.global(qos: .userInitiated).async {
             var toRecycle: [URL] = []
             var totalSavingsInSession: Int64 = 0
             var skippedCount = 0
             var logBatch: [(kept: DuplicateFileInfo?, removed: [DuplicateFileInfo])] = []
 
-            for group in self.duplicateGroups {
+            for group in self.duplicateGroups where predicate?(group) ?? true {
                 let activeFiles = group.files.filter { !self.deletedPaths.contains($0.fullPath) }
                 var groupRemoved: [DuplicateFileInfo] = []
 

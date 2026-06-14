@@ -167,6 +167,7 @@ struct ContentView: View {
     @State private var selectedFile: DuplicateFileInfo? = nil
     @State private var selectedPhotoID: UUID? = nil
     @State private var selectedCloudID: String? = nil
+    @State private var filesSizeFilter = SizeFilter()
     @State private var showingBatchDeleteConfirm = false
     @State private var showingRegisterAlert = false
     @State private var folderGroupToMerge: FolderDuplicateGroup? = nil
@@ -198,7 +199,7 @@ struct ContentView: View {
     @State private var searchedModes: Set<AppMode> = []  // modes that have run at least one search this session
 
     var hasRemovableDuplicates: Bool {
-        for group in shownFileGroups {
+        for group in displayedFileGroups {
             let activeCount = group.files.filter { !scanner.deletedPaths.contains($0.fullPath) }.count
             if activeCount > 1 { return true }
         }
@@ -208,11 +209,22 @@ struct ContentView: View {
     // Results shown for the CURRENT mode only. Files & Folders share the scanner,
     // so gate by which mode last ran it; results persist across mode switches and
     // change only on a new search.
+    // Remote source segment: "OneDrive → <profile>" when a connection is active, else "Remote".
+    var remoteSegmentLabel: String {
+        guard let conn = connectionStore.activeConnection else { return ScanSource.remote.rawValue }
+        return "\(conn.kind.displayName) → \(conn.displayName)"
+    }
+
     var shownFileGroups: [DuplicateGroup] {
-        mode == .files ? fileScanner.duplicateGroups : []
+        (source == .local && mode == .files) ? fileScanner.duplicateGroups : []
     }
     var shownFolderGroups: [FolderDuplicateGroup] {
-        mode == .folders ? folderScanner.folderDuplicateGroups : []
+        (source == .local && mode == .folders) ? folderScanner.folderDuplicateGroups : []
+    }
+    // Files results after the session-only size filter. Used for display, sections,
+    // and bulk clean so the filter scopes everything consistently.
+    var displayedFileGroups: [DuplicateGroup] {
+        filesSizeFilter.isActive ? shownFileGroups.filter { filesSizeFilter.contains($0.sizeBytes) } : shownFileGroups
     }
 
     // Show the scanner savings/recoveries only in the local mode that produced them.
@@ -226,7 +238,10 @@ struct ContentView: View {
         let localMerge = !shownFolderGroups.isEmpty && !scanner.isScanning
         let cloudMerge = source == .remote && mode == .folders && !remoteEngine.folderGroups.isEmpty && !remoteEngine.isScanning
         let cleanAll = hasRemovableDuplicates && !scanner.isScanning
-        return localMerge || cloudMerge || cleanAll
+        // Keep the row visible for the size filter whenever Files results exist,
+        // even if the current filter hides every removable group.
+        let filesFilterable = source == .local && mode == .files && !shownFileGroups.isEmpty && !scanner.isScanning
+        return localMerge || cloudMerge || cleanAll || filesFilterable
     }
 
     var body: some View {
@@ -251,13 +266,13 @@ struct ContentView: View {
                 Picker("", selection: $source) {
                     Label(ScanSource.local.rawValue, systemImage: ScanSource.local.icon).tag(ScanSource.local)
                     // Remote segment reflects the active connection's provider + name.
-                    Label(connectionStore.activeConnection?.displayName ?? ScanSource.remote.rawValue,
+                    Label(remoteSegmentLabel,
                           systemImage: connectionStore.activeConnection?.kind.icon ?? ScanSource.remote.icon)
                         .tag(ScanSource.remote)
                 }
                 .pickerStyle(.segmented)
                 .labelStyle(.titleAndIcon)
-                .frame(width: 220)
+                .frame(width: 260)
                 .disabled(activeScanning)
                 .help("Scan local folders or a remote connection (⌥-click Remote to pick a connection).")
                 .onChange(of: source) { s in
@@ -496,6 +511,9 @@ struct ContentView: View {
                 Divider()
                 HStack(spacing: 12) {
                   Text("ACTIONS").font(.system(size: 9, weight: .bold)).foregroundColor(.secondary.opacity(0.6))
+                if source == .local && mode == .files && !shownFileGroups.isEmpty && !scanner.isScanning {
+                    SizeFilterBar(filter: $filesSizeFilter)
+                }
                 if !shownFolderGroups.isEmpty && !scanner.isScanning {
                     Toggle(isOn: $folderScanner.safeMergeToNewFolder) {
                         Label("Copy to new folder", systemImage: "doc.on.doc").font(.system(size: 10))
@@ -734,7 +752,8 @@ struct ContentView: View {
             } else if !shownFileGroups.isEmpty || !shownFolderGroups.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
-                        Text("Duplicate Groups found (\(shownFileGroups.count + shownFolderGroups.count)):").font(.caption).fontWeight(.bold)
+                        let fileCount = filesSizeFilter.isActive ? "\(displayedFileGroups.count) of \(shownFileGroups.count)" : "\(displayedFileGroups.count + shownFolderGroups.count)"
+                        Text("Duplicate Groups found (\(fileCount)):").font(.caption).fontWeight(.bold)
                         Spacer()
                         Text("Space to Preview").font(.system(size: 8, weight: .bold)).foregroundColor(.blue)
                         Text("Safety Lock Active").font(.system(size: 9, weight: .bold)).foregroundColor(.orange)
@@ -742,7 +761,7 @@ struct ContentView: View {
                             .background(Color.orange.opacity(0.1)).cornerRadius(4)
                     }
                     .padding(.horizontal).padding(.vertical, 8).foregroundColor(.secondary)
-                    
+
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 8) {
                             if !resultSections.isEmpty {
@@ -752,13 +771,13 @@ struct ContentView: View {
                                         if scanner.detectFolderDuplicates {
                                             ForEach(shownFolderGroups.filter { sectionKey(forFolderGroup: $0) == key }) { folderGroupRow($0) }
                                         } else {
-                                            ForEach(shownFileGroups.filter { sectionKey(forFileGroup: $0) == key }) { fileGroupRow($0) }
+                                            ForEach(displayedFileGroups.filter { sectionKey(forFileGroup: $0) == key }) { fileGroupRow($0) }
                                         }
                                     }
                                 }
                             } else {
                                 ForEach(shownFolderGroups) { folderGroupRow($0) }
-                                ForEach(shownFileGroups) { fileGroupRow($0) }
+                                ForEach(displayedFileGroups) { fileGroupRow($0) }
                             }
                         }
                         .padding(.horizontal)
@@ -873,10 +892,14 @@ struct ContentView: View {
         .frame(minWidth: 700, minHeight: 520)
         .sheet(isPresented: $showingBatchDeleteConfirm) {
             CleanAllConfirmationSheet(
-                composition: cleanComposition(shownFileGroups, deleted: scanner.deletedPaths),
+                composition: cleanComposition(displayedFileGroups, deleted: scanner.deletedPaths),
                 onClean: {
                     showingBatchDeleteConfirm = false
-                    scanner.recycleAllDuplicates()
+                    if filesSizeFilter.isActive {
+                        scanner.recycleAllDuplicates(matching: { filesSizeFilter.contains($0.sizeBytes) })
+                    } else {
+                        scanner.recycleAllDuplicates()
+                    }
                 },
                 onCancel: { showingBatchDeleteConfirm = false }
             )
@@ -1093,7 +1116,7 @@ struct ContentView: View {
     private func sectionCount(_ key: String) -> Int {
         scanner.detectFolderDuplicates
             ? scanner.folderDuplicateGroups.filter { sectionKey(forFolderGroup: $0) == key }.count
-            : scanner.duplicateGroups.filter { sectionKey(forFileGroup: $0) == key }.count
+            : displayedFileGroups.filter { sectionKey(forFileGroup: $0) == key }.count
     }
 
     // Ordered section keys (selected folders first in selection order, then the

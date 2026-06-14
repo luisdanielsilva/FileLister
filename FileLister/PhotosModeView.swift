@@ -53,6 +53,13 @@ struct PhotosModeView: View {
     let hasFolders: Bool
     @Binding var selectedPhotoID: UUID?
     @State private var activeSheet: PhotoConfirmSheet?
+    @State private var sizeFilter = SizeFilter()
+
+    // A group is shown if at least one of its photos falls within the size range.
+    private var displayedGroups: [PhotoGroup] {
+        guard sizeFilter.isActive else { return engine.groups }
+        return engine.groups.filter { g in g.photos.contains { sizeFilter.contains($0.sizeBytes) } }
+    }
 
     var body: some View {
         if engine.isScanning {
@@ -75,12 +82,15 @@ struct PhotosModeView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
+            let groups = displayedGroups
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Text("Similar photo groups (\(engine.groups.count)):")
+                    Text("Similar photo groups (\(sizeFilter.isActive ? "\(groups.count) of \(engine.groups.count)" : "\(engine.groups.count)")):")
                         .font(.caption).fontWeight(.bold)
                     Text("Space to preview · ← → to move").font(.system(size: 8, weight: .bold)).foregroundColor(.blue)
                     Spacer()
+                    SizeFilterBar(filter: $sizeFilter)
+                    Divider().frame(height: 16)
                     if let logURL = engine.lastLogURL {
                         Button(action: { NSWorkspace.shared.activateFileViewerSelecting([logURL]) }) {
                             Label("Reveal Log", systemImage: "doc.text.magnifyingglass").font(.system(size: 10))
@@ -94,7 +104,7 @@ struct PhotosModeView: View {
 
                 ScrollView {
                     LazyVStack(spacing: 12) {
-                        ForEach(engine.groups) { group in
+                        ForEach(groups) { group in
                             groupCard(group)
                         }
                     }
@@ -113,12 +123,21 @@ struct PhotosModeView: View {
                 case .all:
                     PhotoDeleteAllConfirmSheet(
                         engine: engine,
-                        onConfirm: { engine.recycleAllNonKeepers(); activeSheet = nil },
+                        groups: displayedGroups,
+                        onConfirm: { engine.recycleAllNonKeepers(in: displayedGroups); activeSheet = nil },
                         onCancel: { activeSheet = nil }
                     )
                 }
             }
+            // Keep the size-filter text fields from holding keyboard focus, so Space
+            // (preview) and the arrow keys reach their shortcuts instead of the field.
+            .onAppear { resignTextFocus() }
+            .onChange(of: selectedPhotoID) { _, _ in resignTextFocus() }
         }
+    }
+
+    private func resignTextFocus() {
+        DispatchQueue.main.async { NSApp.keyWindow?.makeFirstResponder(nil) }
     }
 
     @ViewBuilder
@@ -233,7 +252,7 @@ struct PhotosModeView: View {
         panel.canCreateDirectories = true
         panel.message = "Choose where to copy the keeper photos. Their folder structure is replicated; the originals are not touched."
         panel.prompt = "Copy Keepers Here"
-        if panel.runModal() == .OK, let url = panel.url { engine.copyKeepers(to: url) }
+        if panel.runModal() == .OK, let url = panel.url { engine.copyKeepers(to: url, from: displayedGroups) }
     }
 
     private func byteString(_ bytes: Int) -> String {
@@ -410,6 +429,7 @@ struct SpaceDonut: View {
 // Summary confirmation for deleting every group's non-keepers (no thumbnails).
 struct PhotoDeleteAllConfirmSheet: View {
     @ObservedObject var engine: PhotoEngine
+    let groups: [PhotoGroup]
     let onConfirm: () -> Void
     let onCancel: () -> Void
 
@@ -417,7 +437,7 @@ struct PhotoDeleteAllConfirmSheet: View {
 
     private var totals: Totals {
         var t = Totals()
-        for g in engine.groups {
+        for g in groups {
             let live = g.photos.filter { !engine.deletedPaths.contains($0.fullPath) }
             guard live.contains(where: { $0.id != g.keeperID }) else { continue }
             t.groups += 1

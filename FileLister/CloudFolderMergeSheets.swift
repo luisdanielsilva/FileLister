@@ -323,12 +323,13 @@ struct CloudDeleteGroupSheet: View {
 // Confirm deleting all duplicates across every detected file group (Files mode).
 struct CloudDeleteAllSheet: View {
     @ObservedObject var engine: RemoteEngine
+    let groups: [CloudDupGroup]
     let onDeleteAll: () -> Void
 
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        let affected = engine.groups.filter { g in
+        let affected = groups.filter { g in
             g.files.filter { !engine.deletedIDs.contains($0.id) }.count > 1
         }
         let totalFiles = affected.reduce(0) { sum, g in

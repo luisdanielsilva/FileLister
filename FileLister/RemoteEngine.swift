@@ -456,7 +456,7 @@ final class RemoteEngine: ObservableObject {
         delete([file], keep: keep)
     }
 
-    func deleteAll() {
+    func deleteGroups(_ groups: [CloudDupGroup]) {
         var keepBy: [String: CloudFileInfo] = [:]
         var targets: [CloudFileInfo] = []
         for g in groups {
@@ -468,6 +468,8 @@ final class RemoteEngine: ObservableObject {
         guard !targets.isEmpty else { return }
         delete(targets, keep: nil, keepByHash: keepBy)
     }
+
+    func deleteAll() { deleteGroups(groups) }
 
     // Delete every removable duplicate across all detected folder clusters.
     func deleteAllFolders() {
