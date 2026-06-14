@@ -137,6 +137,7 @@ struct ContentView: View {
     // Saved remote connections (Phase 2 of #6). The store owns one provider per
     // connection; the engine is pointed at the active one on activation.
     @ObservedObject private var connectionStore = RemoteConnectionStore.shared
+    @ObservedObject private var scanFilters = ScanFilters.shared
     @StateObject private var remoteEngine = RemoteEngine()
     @EnvironmentObject var licenseManager: LicenseManager
     @State private var showingConnectionPicker = false
@@ -168,6 +169,7 @@ struct ContentView: View {
     @State private var selectedPhotoID: UUID? = nil
     @State private var selectedCloudID: String? = nil
     @State private var filesSizeFilter = SizeFilter()
+    @State private var showingFilters = false
     @State private var showingBatchDeleteConfirm = false
     @State private var showingRegisterAlert = false
     @State private var folderGroupToMerge: FolderDuplicateGroup? = nil
@@ -221,10 +223,21 @@ struct ContentView: View {
     var shownFolderGroups: [FolderDuplicateGroup] {
         (source == .local && mode == .folders) ? folderScanner.folderDuplicateGroups : []
     }
-    // Files results after the session-only size filter. Used for display, sections,
-    // and bulk clean so the filter scopes everything consistently.
+    // Files results after the post-search filters (size + include/exclude). Used for
+    // display, sections, and bulk clean so everything is scoped consistently.
     var displayedFileGroups: [DuplicateGroup] {
-        filesSizeFilter.isActive ? shownFileGroups.filter { filesSizeFilter.contains($0.sizeBytes) } : shownFileGroups
+        var groups = shownFileGroups
+        if filesSizeFilter.isActive {
+            groups = groups.filter { filesSizeFilter.contains($0.sizeBytes) }
+        }
+        if scanFilters.isActive {
+            groups = groups.compactMap { g in
+                let kept = g.files.filter { scanFilters.allows(fullPath: $0.fullPath) }
+                guard kept.count >= 2 else { return nil }
+                var copy = g; copy.files = kept; return copy
+            }
+        }
+        return groups
     }
 
     // Show the scanner savings/recoveries only in the local mode that produced them.
@@ -431,6 +444,19 @@ struct ContentView: View {
               // ── Options ──
               HStack(spacing: 20) {
                 Text("OPTIONS").font(.system(size: 9, weight: .bold)).foregroundColor(.secondary.opacity(0.6))
+                Button(action: { showingFilters.toggle() }) {
+                    HStack(spacing: 3) {
+                        Image(systemName: scanFilters.isActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                        Text("Filters")
+                    }
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(scanFilters.isActive ? .orange : .secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background((scanFilters.isActive ? Color.orange : Color.secondary).opacity(0.12)).cornerRadius(4)
+                }
+                .buttonStyle(.plain)
+                .help("Include/exclude folders and extensions for every search (local & remote)")
+                .popover(isPresented: $showingFilters, arrowEdge: .bottom) { ScanFiltersPopover() }
                 HStack(spacing: 15) {
                     if mode == .files {
                         Toggle(isOn: $fileScanner.useDeepAnalysis) {
@@ -895,11 +921,7 @@ struct ContentView: View {
                 composition: cleanComposition(displayedFileGroups, deleted: scanner.deletedPaths),
                 onClean: {
                     showingBatchDeleteConfirm = false
-                    if filesSizeFilter.isActive {
-                        scanner.recycleAllDuplicates(matching: { filesSizeFilter.contains($0.sizeBytes) })
-                    } else {
-                        scanner.recycleAllDuplicates()
-                    }
+                    scanner.recycleAllDuplicates(in: displayedFileGroups)
                 },
                 onCancel: { showingBatchDeleteConfirm = false }
             )

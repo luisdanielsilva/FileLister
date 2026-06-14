@@ -52,13 +52,28 @@ struct PhotosModeView: View {
     @ObservedObject var engine: PhotoEngine
     let hasFolders: Bool
     @Binding var selectedPhotoID: UUID?
+    @ObservedObject private var scanFilters = ScanFilters.shared
     @State private var activeSheet: PhotoConfirmSheet?
     @State private var sizeFilter = SizeFilter()
 
-    // A group is shown if at least one of its photos falls within the size range.
+    // Post-search filters: size (group shown if any photo is in range) + include/exclude
+    // (per-photo; a group needs 2+ surviving photos, and the keeper is reassigned if dropped).
     private var displayedGroups: [PhotoGroup] {
-        guard sizeFilter.isActive else { return engine.groups }
-        return engine.groups.filter { g in g.photos.contains { sizeFilter.contains($0.sizeBytes) } }
+        var groups = engine.groups
+        if sizeFilter.isActive {
+            groups = groups.filter { g in g.photos.contains { sizeFilter.contains($0.sizeBytes) } }
+        }
+        if scanFilters.isActive {
+            groups = groups.compactMap { g in
+                let kept = g.photos.filter { scanFilters.allows(fullPath: $0.fullPath) }
+                guard kept.count >= 2 else { return nil }
+                var copy = g
+                copy.photos = kept
+                if !kept.contains(where: { $0.id == copy.keeperID }) { copy.keeperID = kept[0].id }
+                return copy
+            }
+        }
+        return groups
     }
 
     var body: some View {

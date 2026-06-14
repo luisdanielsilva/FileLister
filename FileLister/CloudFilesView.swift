@@ -17,16 +17,25 @@ struct ProgressRing: View {
 
 struct CloudFilesView: View {
     @ObservedObject var engine: RemoteEngine
+    @ObservedObject private var scanFilters = ScanFilters.shared
     @Binding var selectedCloudID: String?
     @State private var showingDeleteAll = false
     @State private var sizeFilter = SizeFilter()
 
     private var filteredGroups: [CloudDupGroup] {
-        guard sizeFilter.isActive else { return engine.groups }
-        return engine.groups.filter { sizeFilter.contains($0.sizeBytes) }
+        var groups = engine.groups
+        if sizeFilter.isActive { groups = groups.filter { sizeFilter.contains($0.sizeBytes) } }
+        if scanFilters.isActive {
+            groups = groups.compactMap { g in
+                let kept = g.files.filter { scanFilters.allows(fullPath: $0.fullPath) }
+                guard kept.count >= 2 else { return nil }
+                var copy = g; copy.files = kept; return copy
+            }
+        }
+        return groups
     }
 
-    private var filterActive: Bool { sizeFilter.isActive }
+    private var filterActive: Bool { sizeFilter.isActive || scanFilters.isActive }
 
     var body: some View {
         if engine.isScanning {

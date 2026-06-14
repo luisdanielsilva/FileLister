@@ -5,7 +5,7 @@ features land or plans change.
 
 Status legend: ✅ Done · 🚧 In progress / uncommitted · 📋 Planned
 
-Latest version: **v1.19.0** (committed & pushed to `origin/main`). Latest GitHub *release*: **v1.13.0** (v1.14–v1.19 are tagged commits awaiting releases).
+Latest version: **v1.20.0** (committed & pushed to `origin/main`). Latest GitHub *release*: **v1.13.0** (v1.14–v1.20 are tagged commits awaiting releases).
 
 ---
 
@@ -23,6 +23,7 @@ Latest version: **v1.19.0** (committed & pushed to `origin/main`). Latest GitHub
 | Files options — Deep Scan, Media-only, No Hidden, Symlinks | ✅ | |
 | Confidence scoring | ✅ | v1.5.0, refined v1.6.0 |
 | Files/Photos — min/max size filter (display + bulk action scoping) | ✅ | v1.19.0; [#16](https://github.com/luisdanielsilva/FileLister/issues/16). Local + remote Files and Photos; shared `SizeFilter`; in the action row |
+| Include/exclude folders & extensions (any search) | ✅ | v1.20.0; [#18](https://github.com/luisdanielsilva/FileLister/issues/18). Global session-only rules; post-search/instant; toolbar Filters popover; per-file scoping incl. bulk actions |
 | Symlink duplicate detection | ✅ | v1.4.0 |
 | Folders mode — duplicate folder clusters | ✅ | v1.5.0; union-find on file hashes, match-ratio threshold |
 | Folders — interactive merge, safe merge, "Copy to new folder" | ✅ | v1.8.0 |
@@ -117,6 +118,7 @@ Generalizing the OneDrive code into a provider-agnostic **Remote** layer so othe
 | v1.17.0 | Remote provider protocol (Phase 1 of #6); OneDrive safe merge "Copy to new folder" (cloud→cloud) + create-destination + confirmation sheets |
 | v1.18.0 | Multi-connection remote management (#7 / Phase 2 of #6): RemoteConnectionStore, per-connection Keychain slots, connection picker (⌥-click), Settings → Connections tab, token purge on quit; Files mode delete confirmation sheets |
 | v1.19.0 | Min/max size filter for Files + Photos (#16, local & remote) with bulk-action scoping; fix duplicate action-row controls when switching to a Remote connection; Space-preview focus fix + "scan limit" relabel; "Provider → profile" source label |
+| v1.20.0 | Include/exclude folders & extensions for any search (#18, local & remote): global session-only rules, applied post-search/instant via a toolbar Filters popover; per-file scoping so bulk actions only touch visible items |
 
 > Note: the web portal / marketing site and licensing tools shared this repo early
 > on, then were split into separate repositories (mid-April 2026). Their commits are

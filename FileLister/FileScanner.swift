@@ -74,7 +74,7 @@ struct DuplicateGroup: Identifiable {
     let name: String
     let size: String
     let sizeBytes: Int
-    let files: [DuplicateFileInfo]
+    var files: [DuplicateFileInfo]
     var isSymlinkGroup: Bool = false
     var confidence: DuplicateConfidence? = nil
     var rootFolder: String? = nil   // set in per-folder scope so results can be sectioned
@@ -166,7 +166,7 @@ class FileScanner: ObservableObject {
     private var totalItems: Int = 0
     private var processedItems: Int = 0
     private var shouldStop: Bool = false
-    
+
     private let mediaExtensions: Set<String> = [
         "jpg", "jpeg", "png", "gif", "heic", "tiff", "bmp",
         "mp4", "mov", "avi", "mkv", "wmv", "flv", "webm"
@@ -841,9 +841,11 @@ class FileScanner: ObservableObject {
         }
     }
 
-    func recycleAllDuplicates(matching predicate: ((DuplicateGroup) -> Bool)? = nil) {
+    // Pass the displayed (filtered) groups to clean only what's visible; nil = all.
+    func recycleAllDuplicates(in groups: [DuplicateGroup]? = nil) {
         self.status = "Verifying batch integrity..."
         self.isScanning = true // Use scan state to block UI during heavy comparison
+        let targetGroups = groups ?? self.duplicateGroups
 
         DispatchQueue.global(qos: .userInitiated).async {
             var toRecycle: [URL] = []
@@ -851,7 +853,7 @@ class FileScanner: ObservableObject {
             var skippedCount = 0
             var logBatch: [(kept: DuplicateFileInfo?, removed: [DuplicateFileInfo])] = []
 
-            for group in self.duplicateGroups where predicate?(group) ?? true {
+            for group in targetGroups {
                 let activeFiles = group.files.filter { !self.deletedPaths.contains($0.fullPath) }
                 var groupRemoved: [DuplicateFileInfo] = []
 
