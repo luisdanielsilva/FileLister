@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import ImageIO
 
 struct CloudFolder: Identifiable, Hashable {
     let id: String       // "root" or a drive item id
@@ -58,9 +59,17 @@ final class RemoteEngine: ObservableObject {
     @Published var status = "Connect and search to find duplicates in OneDrive."
     @Published var groups: [CloudDupGroup] = []
     @Published var folderGroups: [CloudFolderDupGroup] = []
+    @Published var photoGroups: [CloudPhotoGroup] = []        // #4 cloud similar-photo clusters
     @Published var deletedIDs: Set<String> = []
     @Published var hitLimit = false
     @Published var lastLogURL: URL? = nil
+
+    // Cloud photo similarity controls (mirror the local Photos engine).
+    @Published var photoMatchThreshold: Double = 0.90
+    @Published var photoRequireExif = false
+    // Thumbnail JPEG data per drive item id, downloaded during the photo scan and
+    // reused for display (avoids re-fetching short-lived Graph thumbnail URLs).
+    private(set) var photoThumbnailData: [String: Data] = [:]
 
     private var shouldStop = false
     private let folderMatchThreshold = 0.75
@@ -147,6 +156,261 @@ final class RemoteEngine: ObservableObject {
                 self.status = "OneDrive scan failed: \(error.localizedDescription)"
             }
         }
+    }
+
+    // MARK: Photos (#4 — cloud similar-photo detection)
+
+    private static let imageExtensions: Set<String> = [
+        "jpg", "jpeg", "png", "heic", "heif", "tiff", "tif", "gif", "bmp", "webp",
+        "cr2", "cr3", "nef", "arw", "dng", "orf", "raf", "rw2"
+    ]
+
+    // One image collected during the photo crawl (metadata + a thumbnail URL to fetch).
+    private struct CloudImageItem {
+        let id: String, name: String, path: String, size: Int64
+        let pixelW: Int, pixelH: Int
+        let captureDate: Date?, cameraModel: String?, gps: (Double, Double)?
+        let thumbURL: String?, webURL: String?
+    }
+
+    func scanPhotos(folders: [CloudFolder]) {
+        shouldStop = false
+        isScanning = true
+        progress = 0
+        photoGroups = []
+        deletedIDs = []
+        hitLimit = false
+        photoThumbnailData = [:]
+        status = "Connecting…"
+
+        Task {
+            guard let token = await provider?.validAccessToken() else {
+                self.isScanning = false; self.status = "Not connected. Please reconnect OneDrive."
+                return
+            }
+            do {
+                let roots = folders.map { $0.id }
+                let items = try await crawlPhotos(token: token, roots: roots)
+                // Download each thumbnail and compute perceptual hashes.
+                var photos: [CloudPhotoInfo] = []
+                photos.reserveCapacity(items.count)
+                for (i, it) in items.enumerated() {
+                    if shouldStop { break }
+                    self.status = "Analyzing photo \(i + 1)/\(items.count): \(it.name)"
+                    self.progress = items.isEmpty ? 1 : Double(i) / Double(items.count)
+                    guard let urlStr = it.thumbURL, let url = URL(string: urlStr),
+                          let (data, _) = try? await URLSession.shared.data(from: url) else { continue }
+                    // Decode + hash off the main actor.
+                    let hashes = await Task.detached(priority: .userInitiated) { () -> (UInt64, UInt64)? in
+                        guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+                        let opts: [CFString: Any] = [
+                            kCGImageSourceCreateThumbnailFromImageAlways: true,
+                            kCGImageSourceCreateThumbnailWithTransform: true,
+                            kCGImageSourceThumbnailMaxPixelSize: 64
+                        ]
+                        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+                        return (PhotoEngine.dHash(cg), PhotoEngine.pHash(cg))
+                    }.value
+                    guard let (dh, ph) = hashes else { continue }
+                    self.photoThumbnailData[it.id] = data
+                    photos.append(CloudPhotoInfo(
+                        id: it.id, name: it.name, path: it.path, size: it.size,
+                        pixelWidth: it.pixelW, pixelHeight: it.pixelH,
+                        captureDate: it.captureDate, cameraModel: it.cameraModel,
+                        gps: it.gps.map { (lat: $0.0, lon: $0.1) },
+                        dHash: dh, pHash: ph, webURL: it.webURL))
+                }
+
+                if shouldStop {
+                    self.isScanning = false; self.progress = 0; self.status = "Scan stopped."
+                    return
+                }
+
+                let limitNote = self.hitLimit ? " (reached the scan limit — raise it in Settings)" : ""
+                let result = self.groupSimilarPhotos(photos)
+                self.photoGroups = result
+                let dupes = result.reduce(0) { $0 + $1.photos.count - 1 }
+                self.status = "Found \(result.count) similar photo group(s) · \(dupes) removable\(limitNote)."
+                self.isScanning = false
+                self.progress = 1
+            } catch {
+                self.isScanning = false
+                self.status = "OneDrive photo scan failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func photoChildrenURL(_ folderID: String) -> String {
+        let sel = "?$select=id,name,size,file,folder,photo,image,location,parentReference,webUrl&$expand=thumbnails&$top=200"
+        return folderID == "root"
+            ? OneDriveConfig.graphBase + "/me/drive/root/children" + sel
+            : OneDriveConfig.graphBase + "/me/drive/items/\(folderID)/children" + sel
+    }
+
+    // Recursively enumerate the selected folders for image files, capped by count / bytes.
+    private func crawlPhotos(token: String, roots: [String]) async throws -> [CloudImageItem] {
+        let fileLimit = OneDrivePreferences.shared.fileLimit
+        let byteLimit = OneDrivePreferences.shared.byteLimit
+        var items: [CloudImageItem] = []
+        var totalBytes: Int64 = 0
+        var queue: [String] = roots.isEmpty ? ["root"] : roots
+        var qi = 0
+        let iso = ISO8601DateFormatter()
+
+        while qi < queue.count, !shouldStop {
+            let folderID = queue[qi]; qi += 1
+            var next: String? = photoChildrenURL(folderID)
+            while let urlStr = next, !shouldStop {
+                self.status = "Scanning OneDrive photos… \(items.count) found"
+                guard let url = URL(string: urlStr) else { break }
+                var req = URLRequest(url: url)
+                req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                let (data, resp) = try await URLSession.shared.data(for: req)
+                guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {
+                    throw OneDriveError.network("HTTP \((resp as? HTTPURLResponse)?.statusCode ?? -1)")
+                }
+                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { break }
+
+                for item in json["value"] as? [[String: Any]] ?? [] {
+                    if item["folder"] != nil {
+                        if let fid = item["id"] as? String { queue.append(fid) }
+                        continue
+                    }
+                    guard item["file"] != nil else { continue }
+                    let name = item["name"] as? String ?? "?"
+                    let ext = (name as NSString).pathExtension.lowercased()
+                    guard item["image"] != nil || Self.imageExtensions.contains(ext) else { continue }
+
+                    let id = item["id"] as? String ?? ""
+                    let size = (item["size"] as? Int64) ?? Int64(item["size"] as? Int ?? 0)
+                    let parent = item["parentReference"] as? [String: Any]
+                    let rawPath = (parent?["path"] as? String) ?? ""
+                    let path = rawPath.replacingOccurrences(of: "/drive/root:", with: "").removingPercentEncoding ?? rawPath
+
+                    let imageF = item["image"] as? [String: Any]
+                    let photoF = item["photo"] as? [String: Any]
+                    let locF = item["location"] as? [String: Any]
+                    let w = (imageF?["width"] as? Int) ?? 0
+                    let h = (imageF?["height"] as? Int) ?? 0
+                    var capture: Date? = nil
+                    if let s = photoF?["takenDateTime"] as? String { capture = iso.date(from: s) }
+                    let camera = photoF?["cameraModel"] as? String
+                    var gps: (Double, Double)? = nil
+                    if let lat = locF?["latitude"] as? Double, let lon = locF?["longitude"] as? Double { gps = (lat, lon) }
+
+                    // Largest available thumbnail URL from the expanded set.
+                    var thumb: String? = nil
+                    if let set = (item["thumbnails"] as? [[String: Any]])?.first {
+                        thumb = ((set["large"] as? [String: Any])?["url"] as? String)
+                            ?? ((set["medium"] as? [String: Any])?["url"] as? String)
+                            ?? ((set["small"] as? [String: Any])?["url"] as? String)
+                    }
+
+                    items.append(CloudImageItem(id: id, name: name, path: path, size: size,
+                                                pixelW: w, pixelH: h, captureDate: capture,
+                                                cameraModel: camera, gps: gps, thumbURL: thumb,
+                                                webURL: item["webUrl"] as? String))
+                    totalBytes += size
+                    if items.count >= fileLimit || totalBytes >= byteLimit {
+                        hitLimit = true
+                        return items
+                    }
+                }
+                next = json["@odata.nextLink"] as? String
+            }
+        }
+        return items
+    }
+
+    private func groupSimilarPhotos(_ photos: [CloudPhotoInfo]) -> [CloudPhotoGroup] {
+        let n = photos.count
+        guard n > 1 else { return [] }
+        let maxHam = Int((1.0 - photoMatchThreshold) * 64.0)
+
+        var parent = Array(0..<n)
+        func find(_ x: Int) -> Int { var r = x; while parent[r] != r { parent[r] = parent[parent[r]]; r = parent[r] }; return r }
+        func union(_ a: Int, _ b: Int) { let ra = find(a), rb = find(b); if ra != rb { parent[ra] = rb } }
+
+        for i in 0..<n {
+            if shouldStop { break }
+            for j in (i + 1)..<n {
+                let dd = (photos[i].dHash ^ photos[j].dHash).nonzeroBitCount
+                if dd > maxHam + 12 { continue }
+                let pd = (photos[i].pHash ^ photos[j].pHash).nonzeroBitCount
+                if pd <= maxHam {
+                    if photoRequireExif && !exifCorroboratesCloud(photos[i], photos[j]) { continue }
+                    union(i, j)
+                }
+            }
+        }
+
+        var buckets: [Int: [CloudPhotoInfo]] = [:]
+        for i in 0..<n { buckets[find(i), default: []].append(photos[i]) }
+        return buckets.values
+            .filter { $0.count > 1 }
+            .map { CloudPhotoGroup(photos: $0, keeperID: bestCloudCopy(of: $0).id) }
+            .sorted { $0.reclaimableBytes(excluding: []) > $1.reclaimableBytes(excluding: []) }
+    }
+
+    private func exifCorroboratesCloud(_ a: CloudPhotoInfo, _ b: CloudPhotoInfo) -> Bool {
+        if let da = a.captureDate, let db = b.captureDate, abs(da.timeIntervalSince(db)) <= 2 { return true }
+        if let ca = a.cameraModel, let cb = b.cameraModel, ca == cb,
+           a.pixelWidth == b.pixelWidth, a.pixelHeight == b.pixelHeight { return true }
+        return false
+    }
+
+    // Keeper rule: highest resolution, then largest file, then newest capture.
+    func bestCloudCopy(of photos: [CloudPhotoInfo]) -> CloudPhotoInfo {
+        var best = photos[0]
+        for p in photos.dropFirst() {
+            if p.pixels != best.pixels { if p.pixels > best.pixels { best = p }; continue }
+            if p.size != best.size { if p.size > best.size { best = p }; continue }
+            let dp = p.captureDate ?? .distantPast, db = best.captureDate ?? .distantPast
+            if dp > db { best = p }
+        }
+        return best
+    }
+
+    func setPhotoKeeper(_ photoID: String, in groupID: UUID) {
+        guard let gi = photoGroups.firstIndex(where: { $0.id == groupID }) else { return }
+        photoGroups[gi].keeperID = photoID
+    }
+
+    // Move every group's non-keeper photos (within the given groups) to the recycle bin.
+    func recycleNonKeeperPhotos(in groups: [CloudPhotoGroup]) {
+        let targets = groups.flatMap { g in g.photos.filter { $0.id != g.keeperID && !deletedIDs.contains($0.id) } }
+        guard !targets.isEmpty else { return }
+        isScanning = true
+        status = "Deleting \(targets.count) photo(s) from OneDrive…"
+        Task {
+            guard let token = await provider?.validAccessToken() else {
+                self.isScanning = false; self.status = "Not connected."; return
+            }
+            var ok = 0, errors = 0
+            var entries: [MergeLogEntry] = []
+            for g in groups where g.photos.contains(where: { $0.id != g.keeperID && !deletedIDs.contains($0.id) }) {
+                if let k = g.keeper { entries.append(photoLogEntry(k, action: "KEPT", note: "kept best copy")) }
+                for t in g.photos where t.id != g.keeperID && !deletedIDs.contains(t.id) {
+                    if shouldStop { break }
+                    if await deleteItem(id: t.id, token: token) {
+                        ok += 1; self.deletedIDs.insert(t.id)
+                        entries.append(photoLogEntry(t, action: "TRASHED", note: "similar to \(g.keeper?.name ?? "keeper") · OneDrive recycle bin"))
+                    } else { errors += 1 }
+                }
+            }
+            self.writeCloudLog(entries)
+            self.isScanning = false
+            let errMsg = errors > 0 ? " (\(errors) failed)" : ""
+            self.status = "Moved \(ok) OneDrive photo(s) to the recycle bin\(errMsg)."
+        }
+    }
+
+    private func photoLogEntry(_ p: CloudPhotoInfo, action: String, note: String) -> MergeLogEntry {
+        MergeLogEntry(action: action, fileName: p.name,
+                      sourcePath: "OneDrive:" + p.fullPath, sourceFolder: "OneDrive:" + p.path,
+                      destinationPath: action == "TRASHED" ? "OneDrive recycle bin" : "OneDrive:" + p.fullPath,
+                      destinationFolder: action == "TRASHED" ? "OneDrive recycle bin" : "OneDrive:" + p.path,
+                      sizeBytes: Int(p.size), sha256: "", note: note)
     }
 
     private func childrenURL(_ folderID: String) -> String {

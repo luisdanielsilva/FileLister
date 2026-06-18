@@ -491,6 +491,19 @@ struct ContentView: View {
                                 .disabled(scanner.isScanning)
                             Text("\(Int(scanner.folderMatchThreshold * 100))%").font(.system(size: 10, weight: .medium)).frame(width: 28)
                         }
+                    } else if mode == .photos && source == .remote {
+                        HStack(spacing: 4) {
+                            Text("Similarity:").font(.system(size: 10)).foregroundColor(.secondary)
+                            Slider(value: $remoteEngine.photoMatchThreshold, in: 0.70...1.0, step: 0.01)
+                                .frame(width: 90)
+                                .disabled(remoteEngine.isScanning)
+                            Text("\(Int(remoteEngine.photoMatchThreshold * 100))%").font(.system(size: 10, weight: .medium)).frame(width: 32)
+                        }
+                        Toggle(isOn: $remoteEngine.photoRequireExif) {
+                            Label("EXIF corroboration", systemImage: "calendar.badge.clock").font(.system(size: 10))
+                        }
+                        .toggleStyle(.checkbox).disabled(remoteEngine.isScanning)
+                        .help("Also require a metadata match (same capture time, or same camera + dimensions) before grouping two photos.")
                     } else if mode == .photos {
                         HStack(spacing: 4) {
                             Text("Similarity:").font(.system(size: 10)).foregroundColor(.secondary)
@@ -744,6 +757,8 @@ struct ContentView: View {
                 } else if remoteConnected && mode == .folders && (!selectedCloudFolders.isEmpty || !remoteEngine.folderGroups.isEmpty) {
                     CloudFoldersView(engine: remoteEngine, selectedCloudID: $selectedCloudID,
                                      onMergeCluster: { previewCloudCluster = $0 })
+                } else if remoteConnected && mode == .photos && (!selectedCloudFolders.isEmpty || !remoteEngine.photoGroups.isEmpty) {
+                    CloudPhotosView(engine: remoteEngine)
                 } else {
                     Spacer()
                     VStack(spacing: 12) {
@@ -752,14 +767,12 @@ struct ContentView: View {
                         Text(remoteConnected ? "\(connName) — \(mode.rawValue)" : connName)
                             .font(.title3).fontWeight(.semibold)
                         Text(remoteConnected
-                             ? ((mode == .files || mode == .folders)
-                                ? "Add one or more folders, then press Search."
-                                : "Duplicate \(mode.rawValue.lowercased()) on \(connName) arrives in a later update.")
+                             ? "Add one or more folders, then press Search."
                              : (connectionStore.activeConnection == nil
                                 ? "Choose a remote connection to scan for duplicates."
                                 : "Connect \(connName) to scan it for duplicates."))
                             .font(.caption).foregroundColor(.secondary).multilineTextAlignment(.center)
-                        if remoteConnected && (mode == .files || mode == .folders) && selectedCloudFolders.isEmpty {
+                        if remoteConnected && selectedCloudFolders.isEmpty {
                             Button("Add Folder…") { showingCloudPicker = true }
                                 .controlSize(.small)
                         }
@@ -1394,7 +1407,7 @@ struct ContentView: View {
             } else if mode == .folders {
                 remoteEngine.scan(folders: selectedCloudFolders, folderMode: true)
             } else {
-                activeProvider?.statusMessage = "\(mode.rawValue) scanning on remote drives arrives in a later update."
+                remoteEngine.scanPhotos(folders: selectedCloudFolders)
             }
             return
         }

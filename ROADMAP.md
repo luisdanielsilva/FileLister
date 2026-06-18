@@ -5,7 +5,7 @@ features land or plans change.
 
 Status legend: ✅ Done · 🚧 In progress / uncommitted · 📋 Planned
 
-Latest version: **v1.20.0** (committed & pushed to `origin/main`). Latest GitHub *release*: **v1.13.0** (v1.14–v1.20 are tagged commits awaiting releases).
+Latest version: **v1.21.0** (committed & pushed to `origin/main`). Latest GitHub *release*: **v1.13.0** (v1.14–v1.21 are tagged commits awaiting releases).
 
 ---
 
@@ -68,7 +68,7 @@ SHA-256 for cloud content matching.
 | **Folders** — "Copy to new folder" (safe merge, cloud→cloud) | ✅ | v1.17.0; [#3](https://github.com/luisdanielsilva/FileLister/issues/3). Async Graph `copy` + monitor poll; pick/create destination ("New Folder") + copy-mode confirmation sheets; originals untouched |
 | **Folders** — safe merge to a **local** folder (download/export) | 📋 | [#3](https://github.com/luisdanielsilva/FileLister/issues/3); deferred — needs keep-folder inventory + bulk-download UI |
 | **Folders** — delete redundant folders only | 📋 | Lower-risk variant; may be obsoleted by the in-place merge |
-| **Photos** — cloud similar-photo detection | 📋 | [#4](https://github.com/luisdanielsilva/FileLister/issues/4). Not started; needs image/thumbnail download + perceptual hashing |
+| **Photos** — cloud similar-photo detection | ✅ | v1.21.0; [#4](https://github.com/luisdanielsilva/FileLister/issues/4). Graph `$expand=thumbnails` + photo/image/location facets; thumbnail download + reuse of `PhotoEngine` dHash/pHash; keeper + delete non-keepers to recycle bin; size + include/exclude filters. v1 defers metadata-expansion, keeper export, space-preview |
 
 ### Remote provider abstraction ([#6](https://github.com/luisdanielsilva/FileLister/issues/6) — Local vs Remote)
 
@@ -119,6 +119,7 @@ Generalizing the OneDrive code into a provider-agnostic **Remote** layer so othe
 | v1.18.0 | Multi-connection remote management (#7 / Phase 2 of #6): RemoteConnectionStore, per-connection Keychain slots, connection picker (⌥-click), Settings → Connections tab, token purge on quit; Files mode delete confirmation sheets |
 | v1.19.0 | Min/max size filter for Files + Photos (#16, local & remote) with bulk-action scoping; fix duplicate action-row controls when switching to a Remote connection; Space-preview focus fix + "scan limit" relabel; "Provider → profile" source label |
 | v1.20.0 | Include/exclude folders & extensions for any search (#18, local & remote): global session-only rules, applied post-search/instant via a toolbar Filters popover; per-file scoping so bulk actions only touch visible items |
+| v1.21.0 | OneDrive Photos mode (#4): cloud similar-photo detection via Graph thumbnails + reused perceptual hashing; group keeper, delete non-keepers to recycle bin (confirmation), size + include/exclude filters |
 
 > Note: the web portal / marketing site and licensing tools shared this repo early
 > on, then were split into separate repositories (mid-April 2026). Their commits are
